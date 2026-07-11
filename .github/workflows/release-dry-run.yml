@@ -1,0 +1,49 @@
+name: Release Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to preview without leading v
+        required: true
+        default: 0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preview-release:
+    name: Preview Release Notes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate version input
+        run: |
+          VERSION="${{ inputs.version }}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] \
+            || { echo "Invalid version: $VERSION" >&2; exit 1; }
+
+      - name: Build release body preview
+        run: |
+          .github/scripts/build-release-body.sh \
+            "${{ inputs.version }}" \
+            release-body.md \
+            release-changelog.md
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-preview-v${{ inputs.version }}
+          path: |
+            release-body.md
+            release-changelog.md
+
+      - name: Add workflow summary
+        run: |
+          echo "## Release preview v${{ inputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          cat release-body.md >> "$GITHUB_STEP_SUMMARY"
