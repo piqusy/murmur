@@ -78,21 +78,202 @@ User and agent murmurs are visually distinct: user = teal, agent = purple
 (both sign glyph and header). Author is determined by the `author` field -
 `"User"` gets user styling, anything else gets agent styling.
 
-## Agent API
+## AI Harness Integration
 
-Agents (AI coding assistants) can create murmurs programmatically:
+Murmur ships a sidecar JSON contract that any agent harness can read and write.
+Ready-made integrations for popular harnesses are included in this repo under
+[`integrations/`](integrations/).
+
+### Sidecar JSON format
+
+Each file `src/foo.ts` has a sidecar `src/foo.ts.murmur.json` — a JSON array of
+murmur objects:
+
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "line": 42,
+    "anchor": "function authenticate(user) {",
+    "author": "Claude",
+    "message": "Refactored — see commit abc123",
+    "created_at": "2026-06-15T10:30:00Z",
+    "orphaned": false
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | UUID, stable across sessions |
+| `line` | number | 1-indexed source line |
+| `anchor` | string | Line text for drift correction after external edits |
+| `author` | string | `"User"` gets user styling (teal); anything else gets agent styling (purple) |
+| `message` | string | Annotation text, no length limit |
+| `created_at` | string | ISO 8601 UTC timestamp |
+| `orphaned` | boolean | `true` when the anchor text can't be relocated within ±20 lines |
+
+### Reading murmurs (harness side)
+
+Before editing a file, the harness checks for a sidecar and surfaces existing
+murmurs to the agent:
+
+1. Resolve the file to annotate (e.g. `src/auth.ts`)
+2. Check if `src/auth.ts.murmur.json` exists
+3. Read and parse the JSON array
+4. Present each murmur's `author`, `message`, and `line` to the agent
+5. When the agent is done, write any new murmurs back to the sidecar
+
+### Writing murmurs (harness side)
+
+Agents write murmurs by appending to the sidecar JSON array. The file watcher
+in Neovim detects the change and re-renders automatically — no Neovim RPC
+needed.
+
+Write a new murmur object with:
+- `id`: a unique UUID string
+- `line`: the 1-indexed target line
+- `anchor`: the exact trimmed text of that line (used for drift recovery)
+- `author`: your agent name (e.g. `"Claude"`, `"OMP"`)
+- `message`: the annotation
+- `created_at`: ISO 8601 UTC
+- `orphaned`: `false`
+
+Append to the array and write the whole file. Keep the array sorted by `line`
+ascending for readability (Neovim re-sorts on load regardless).
+
+**Read-before-write discipline:** agents SHOULD read the existing sidecar,
+append, then write the full array back. This is a cooperative file — agents
+add, never replace.
+
+### Writing murmurs (Neovim-in-process API)
+
+When the agent runs inside Neovim (e.g. via a headless Lua invocation), use the
+programmatic API directly:
 
 ```lua
 require("murmur").add({
-  author = "Claude",       -- anything other than "User" gets agent styling
-  message = "Refactored - see commit abc123",
-  line = 42,               -- optional, defaults to cursor line
-  bufnr = 0,               -- optional, defaults to current buffer
+  author = "Claude",   -- anything other than "User" gets agent styling
+  message = "Refactored — see commit abc123",
+  line = 42,           -- optional, defaults to cursor line
+  bufnr = 0,           -- optional, defaults to current buffer
 })
 ```
 
-External agents can also write directly to the sidecar JSON - the file
-watcher picks up changes and re-renders automatically.
+### Oh My Pi / Pi
+
+An [echo extension](https://github.com/mariozechner/pi-coding-agent) registers
+three delivery paths. The extension ships in this repo at
+[`integrations/omp/`](integrations/omp/):
+
+| File | Installs to | Purpose |
+|---|---|---|
+| [`integrations/omp/index.ts`](integrations/omp/index.ts) | `~/.omp/agent/extensions/murmur/index.ts` | Echo extension: `before_agent_start` hook + `read_murmur` tool + `/murmur-scan` command |
+| [`integrations/omp/package.json`](integrations/omp/package.json) | `~/.omp/agent/extensions/murmur/package.json` | Extension manifest (`"pi": {"extensions": ["./index.ts"]}`) |
+
+**What it does:**
+
+1. **`before_agent_start` hook** (auto-inject) — at session start, scans the
+   project root recursively for all `*.murmur.json` sidecars (skipping
+   `node_modules`, `.git`, `.venv`, `vendor`, `dist`, `build`, `.next`, max
+   6 directory levels deep) and injects every found murmur into the agent's
+   system prompt as pinned line constraints. This is the reliable delivery
+   path — the agent never skips it.
+
+2. **`read_murmur` tool** (per-file lookup) — a registered tool the agent calls
+   before modifying any file. It checks for a sidecar at
+   `<filepath>.murmur.json` and returns formatted murmurs or
+   `"No murmurs for <file>. Clear to edit."`
+
+3. **`/murmur-scan` slash command** — manual rescan that reports how many
+   sidecar files exist in the project.
+
+To install, symlink from your clone of this repo:
+
+```bash
+# Replace ~/src/murmur with your clone path
+# OMP
+mkdir -p ~/.omp/agent/extensions/murmur
+ln -s ~/src/murmur/integrations/omp/index.ts      ~/.omp/agent/extensions/murmur/index.ts
+ln -s ~/src/murmur/integrations/omp/package.json  ~/.omp/agent/extensions/murmur/package.json
+
+# Pi (same files, different config dir)
+mkdir -p ~/.pi/agent/extensions/murmur
+ln -s ~/src/murmur/integrations/omp/index.ts      ~/.pi/agent/extensions/murmur/index.ts
+ln -s ~/src/murmur/integrations/omp/package.json  ~/.pi/agent/extensions/murmur/package.json
+```
+
+### Claude Code
+
+A [PreToolUse hook](https://docs.anthropic.com/en/docs/claude-code/overview#hooks)
+injects murmurs into the agent's context before every file-modifying tool call.
+The hook ships in this repo at
+[`integrations/claude-code/pre_tool_use.sh`](integrations/claude-code/pre_tool_use.sh).
+
+**What it does:**
+- Triggers before `Edit` / `Write` / `MultiEdit` tool calls
+- Reads `<target-file>.murmur.json` and formats each murmur as
+  `Line N [Author] — message (anchored: "...")`
+- Returns the block as `hookSpecificOutput.additionalContext` so Claude Code
+  sees it as a constraint before writing
+- Silently exits when no sidecar exists — zero overhead per call
+
+To install, symlink the hook into your Claude config and register it:
+
+```bash
+# Replace ~/src/murmur with your clone path
+mkdir -p ~/.claude/hooks/murmur
+ln -s ~/src/murmur/integrations/claude-code/pre_tool_use.sh \
+      ~/.claude/hooks/murmur/pre_tool_use.sh
+```
+
+Then add this to your `~/.claude/settings.json` or
+`~/.claude/settings.user.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/.claude/hooks/murmur/pre_tool_use.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The `matcher` restricts the hook to file-modifying tools only (the script also
+filters internally as a safety net). Use an absolute path to the hook script.
+
+### Other harnesses
+
+Any harness that can run a shell script or read JSON files can implement murmur
+support in three steps:
+
+1. **Before editing a file**, check for `<file>.murmur.json` and present its
+   contents to the agent as line constraints
+2. **Inject all project murmurs** at session start by globbing
+   `**/*.murmur.json` (skipping `node_modules`, `.git`, `.venv`, `vendor`,
+   `dist`, `build`, `.next`)
+3. **Write murmurs** by appending new objects to the sidecar JSON array
+
+The sidecar contract in this section is the only integration surface — no
+plugin installation, no Neovim RPC, no external dependencies.
+
+### Global gitignore
+
+Sidecar files are local-only metadata. Ensure they never reach the repository:
+
+```gitignore
+# ~/.gitignore_global
+*.murmur.json
+```
 
 ## How it works
 

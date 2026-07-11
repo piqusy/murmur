@@ -1,0 +1,7 @@
+{
+  "name": "murmur",
+  "version": "0.0.0",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
