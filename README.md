@@ -283,6 +283,64 @@ Before editing any file, call `read_murmur` with the filepath to check for
 user-pinned line constraints. Honor any murmurs returned.
 ```
 
+### Codex CLI
+
+A [PreToolUse hook](https://learn.chatgpt.com/docs/config-file/config-reference) (lifecycle hooks)
+injects murmurs into the agent's context before file-modifying tool calls.
+The hook ships in this repo at
+[`integrations/codex/`](integrations/codex/).
+
+**What it does:**
+- Triggers before `Edit` / `Write` / `MultiEdit` tool calls
+- Reads `<target-file>.murmur.json` and returns formatted constraints as
+  `hookSpecificOutput.additionalContext`
+- Silently exits when no sidecar exists — zero overhead per call
+
+**Prerequisite:** Enable hooks in `~/.codex/config.toml`:
+
+```toml
+[features]
+hooks = true
+```
+
+To install, copy the hook script and merge the hooks config:
+
+```bash
+# Replace ~/src/murmur with your clone path
+mkdir -p ~/.codex/hooks/murmur
+cp ~/src/murmur/integrations/codex/pre_tool_use.sh ~/.codex/hooks/murmur/pre_tool_use.sh
+```
+
+Then add the `PreToolUse` entry to `~/.codex/hooks.json` (merge with existing
+hooks if any). See [`integrations/codex/hooks.json`](integrations/codex/hooks.json)
+for the template — replace the command path with the absolute path to your copy.
+
+On first run, Codex will prompt you to trust the hook.
+
+### Antigravity CLI
+
+A [plugin](https://docs.antigravity.ai) with a `PreToolUse` hook injects murmurs
+before file-modifying tool calls. The plugin ships in this repo at
+[`integrations/antigravity/`](integrations/antigravity/).
+
+**What it does:**
+- Registers a `PreToolUse` hook via the plugin system (same format as Claude Code)
+- Triggers before `Edit` / `Write` / `MultiEdit` tool calls
+- Reads `<target-file>.murmur.json` and returns formatted constraints as
+  `hookSpecificOutput.additionalContext`
+
+To install, copy the plugin directory and install it:
+
+```bash
+# Replace ~/src/murmur with your clone path
+cp -r ~/src/murmur/integrations/antigravity ~/.config/agy/plugins/murmur
+
+# Edit hooks.json to use the absolute path to pre_tool_use.sh, then:
+agy plugin install ~/.config/agy/plugins/murmur
+```
+
+Verify with `agy plugin list`.
+
 ### Other harnesses
 
 Any harness that can run a shell script or read JSON files can implement murmur

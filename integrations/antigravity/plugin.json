@@ -1,0 +1,5 @@
+{
+  "name": "murmur",
+  "version": "0.0.1",
+  "description": "Injects user-pinned line constraints before file edits"
+}
