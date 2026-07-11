@@ -24,7 +24,7 @@ Inline line annotations for Neovim — leave instructions for your AI agent (or 
 
 ```lua
 {
-  "piqusy/murmur.nvim",
+  "piqusy/murmur",
   event = "VeryLazy",
   config = function()
     require("murmur").setup()
