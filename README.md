@@ -251,6 +251,38 @@ Then add this to your `~/.claude/settings.json` or
 The `matcher` restricts the hook to file-modifying tools only (the script also
 filters internally as a safety net). Use an absolute path to the hook script.
 
+### OpenCode
+
+A [custom tool](https://opencode.ai/docs/custom-tools/) registers a
+`read_murmur` tool the agent calls before modifying files. The tool ships in
+this repo at [`integrations/opencode/read_murmur.ts`](integrations/opencode/read_murmur.ts).
+
+**What it does:**
+- Registers a `read_murmur` tool via `@opencode-ai/plugin`'s `tool()` helper
+- Checks for a sidecar at `<filepath>.murmur.json` relative to the project directory
+- Returns formatted murmurs or `"No murmurs for <file>. Clear to edit."`
+
+To install, copy from your clone of this repo (symlinking won't work —
+OpenCode resolves `@opencode-ai/plugin` from the file's real path):
+
+```bash
+# Replace ~/src/murmur with your clone path
+# Project-level (per-project)
+mkdir -p .opencode/tools
+cp ~/src/murmur/integrations/opencode/read_murmur.ts .opencode/tools/read_murmur.ts
+
+# Or global (all projects)
+mkdir -p ~/.config/opencode/tools
+cp ~/src/murmur/integrations/opencode/read_murmur.ts ~/.config/opencode/tools/read_murmur.ts
+```
+
+Then add this to your `AGENTS.md` so the agent knows to use it:
+
+```markdown
+Before editing any file, call `read_murmur` with the filepath to check for
+user-pinned line constraints. Honor any murmurs returned.
+```
+
 ### Other harnesses
 
 Any harness that can run a shell script or read JSON files can implement murmur
