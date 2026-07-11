@@ -1,17 +1,17 @@
 # murmur.nvim
 
-Inline line annotations for Neovim — leave instructions for your AI agent (or future-you) directly on source lines. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
+Inline line annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
 
 ## Features
 
-- **Box mode** — closed `╭─│─╰` frame with author, message, and source line number
-- **Inline mode** — compact EOL shadow text (`Author: message`)
-- **Always-on sign indicator** — `◉` in the sign column whenever a murmur exists
-- **Content wrapping** — long messages wrap to fit the window (box mode)
-- **Line-drift tracking** — extmarks follow text edits; a content anchor re-locates murmurs after external edits
-- **Sidecar storage** — `<file>.murmur.json` alongside each file (gitignored globally)
-- **Pluggable picker** — snacks / telescope / fzf-lua / builtin `vim.ui.select`
-- **Zero dependencies** — works on bare Neovim
+- **Box mode** - closed `╭─│─╰` frame with author, message, and source line number
+- **Inline mode** - compact EOL shadow text (`Author: message`)
+- **Always-on sign indicator** - `◉` in the sign column whenever a murmur exists
+- **Content wrapping** - long messages wrap to fit the window (box mode)
+- **Line-drift tracking** - extmarks follow text edits; a content anchor re-locates murmurs after external edits
+- **Sidecar storage** - `<file>.murmur.json` alongside each file (gitignored globally)
+- **Pluggable picker** - snacks / telescope / fzf-lua / builtin `vim.ui.select`
+- **Zero dependencies** - works on bare Neovim
 
 ## Requirements
 
@@ -75,7 +75,7 @@ require("murmur").setup({
 The render mode persists across restarts (`stdpath('data')/murmur.json`).
 
 User and agent murmurs are visually distinct: user = teal, agent = purple
-(both sign glyph and header). Author is determined by the `author` field —
+(both sign glyph and header). Author is determined by the `author` field -
 `"User"` gets user styling, anything else gets agent styling.
 
 ## Agent API
@@ -85,13 +85,13 @@ Agents (AI coding assistants) can create murmurs programmatically:
 ```lua
 require("murmur").add({
   author = "Claude",       -- anything other than "User" gets agent styling
-  message = "Refactored — see commit abc123",
+  message = "Refactored - see commit abc123",
   line = 42,               -- optional, defaults to cursor line
   bufnr = 0,               -- optional, defaults to current buffer
 })
 ```
 
-External agents can also write directly to the sidecar JSON — the file
+External agents can also write directly to the sidecar JSON - the file
 watcher picks up changes and re-renders automatically.
 
 ## How it works
