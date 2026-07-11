@@ -10,10 +10,12 @@ M.defaults = {
   -- picker for list/delete/edit: "auto" | "snacks" | "telescope" | "fzf" | "builtin"
   picker = "auto",
   highlights = {
-    header = { fg = "#a89984", italic = true },
+    user_header  = { fg = "#4dbd9f", italic = true }, -- teal
+    user_sign    = { fg = "#4dbd9f" },
+    agent_header = { fg = "#d3869b", italic = true }, -- purple
+    agent_sign   = { fg = "#d3869b" },
     body   = { fg = "#ebdbb2" },
     border = { fg = "#928374" },
-    sign   = { fg = "#d3869b" },
     orphan = { fg = "#fe8019", bold = true },
   },
 }

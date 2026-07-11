@@ -61,16 +61,38 @@ require("murmur").setup({
   sidecar_suffix = ".murmur.json",
   picker = "auto",            -- "auto" | "snacks" | "telescope" | "fzf" | "builtin"
   highlights = {
-    header = { fg = "#a89984", italic = true },
+    user_header  = { fg = "#4dbd9f", italic = true }, -- teal
+    user_sign    = { fg = "#4dbd9f" },
+    agent_header = { fg = "#d3869b", italic = true }, -- purple
+    agent_sign   = { fg = "#d3869b" },
     body   = { fg = "#ebdbb2" },
     border = { fg = "#928374" },
-    sign   = { fg = "#d3869b" },
     orphan = { fg = "#fe8019", bold = true },
   },
 })
 ```
 
 The render mode persists across restarts (`stdpath('data')/murmur.json`).
+
+User and agent murmurs are visually distinct: user = teal, agent = purple
+(both sign glyph and header). Author is determined by the `author` field —
+`"User"` gets user styling, anything else gets agent styling.
+
+## Agent API
+
+Agents (AI coding assistants) can create murmurs programmatically:
+
+```lua
+require("murmur").add({
+  author = "Claude",       -- anything other than "User" gets agent styling
+  message = "Refactored — see commit abc123",
+  line = 42,               -- optional, defaults to cursor line
+  bufnr = 0,               -- optional, defaults to current buffer
+})
+```
+
+External agents can also write directly to the sidecar JSON — the file
+watcher picks up changes and re-renders automatically.
 
 ## How it works
 

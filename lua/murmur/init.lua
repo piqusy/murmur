@@ -31,10 +31,12 @@ local state_path = vim.fn.stdpath("data") .. "/murmur.json"
 
 local function setup_highlights()
   local hl = config.options.highlights
-  vim.api.nvim_set_hl(0, "MurmurHeader", hl.header)
+  vim.api.nvim_set_hl(0, "MurmurUserHeader", hl.user_header)
+  vim.api.nvim_set_hl(0, "MurmurUserSign", hl.user_sign)
+  vim.api.nvim_set_hl(0, "MurmurAgentHeader", hl.agent_header)
+  vim.api.nvim_set_hl(0, "MurmurAgentSign", hl.agent_sign)
   vim.api.nvim_set_hl(0, "MurmurBody", hl.body)
   vim.api.nvim_set_hl(0, "MurmurBorder", hl.border)
-  vim.api.nvim_set_hl(0, "MurmurSign", hl.sign)
   vim.api.nvim_set_hl(0, "MurmurOrphan", hl.orphan)
 end
 
@@ -249,17 +251,20 @@ function M.render(bufnr)
       local row = math.max(0, math.min(line - 1, linecount - 1))
       local author = m.author or "User"
       local message = m.message or ""
-      local orphan = m.orphaned  -- D2: orphan bug fix (was undefined)
+      local orphan = m.orphaned
+      local is_agent = author ~= "User"
+      local sign_hl = orphan and "MurmurOrphan" or (is_agent and "MurmurAgentSign" or "MurmurUserSign")
+      local header_hl = orphan and "MurmurOrphan" or (is_agent and "MurmurAgentHeader" or "MurmurUserHeader")
       local opts = {
         sign_text = config.options.sign_text,
-        sign_hl_group = orphan and "MurmurOrphan" or "MurmurSign",
+        sign_hl_group = sign_hl,
       }
 
       if show_content then
         if render_mode == "inline" then
           opts.virt_text = {
-            { "  " .. (orphan and "⚠ " or ""), orphan and "MurmurOrphan" or "MurmurHeader" },
-            { author .. ": ", "MurmurHeader" },
+            { "  " .. (orphan and "⚠ " or ""), orphan and "MurmurOrphan" or header_hl },
+            { author .. ": ", header_hl },
             { message, "MurmurBody" },
           }
           opts.virt_text_pos = "eol"
@@ -287,7 +292,7 @@ function M.render(bufnr)
           else
             header = header_label .. string.rep("─", gap_w) .. "╮"
           end
-          local vl = { { { header, "MurmurHeader" } } }
+          local vl = { { { header, header_hl } } }
           for _, l in ipairs(body_lines) do
             local inner = "  " .. l .. string.rep(" ", content_w - 2 - vim.fn.strdisplaywidth(l))
             table.insert(vl, { { " │", "MurmurBorder" }, { inner, "MurmurBody" }, { "│", "MurmurBorder" } })
@@ -323,34 +328,46 @@ end
 
 -- public actions ------------------------------------------------------------
 
+-- M.add: programmatic (non-interactive) murmur creation — the agent API.
+-- opts: { bufnr?, line?, author?, message }
+function M.add(opts)
+  opts = opts or {}
+  local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) then return false end
+  local path = sidecar_path(bufnr)
+  if not path then return false end
+  sync_back(bufnr)
+  local row = opts.line or vim.api.nvim_win_get_cursor(0)[1]
+  local linecount = vim.api.nvim_buf_line_count(bufnr)
+  row = math.max(1, math.min(row, linecount))
+  local anchor = trim(vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or "")
+  local murmurs = mem[bufnr] or {}
+  table.insert(murmurs, {
+    id = gen_id(),
+    line = row,
+    anchor = anchor,
+    author = opts.author or "Agent",
+    message = opts.message or "",
+    created_at = iso_now(),
+    orphaned = false,
+  })
+  sort_murmurs(murmurs)
+  mem[bufnr] = murmurs
+  write_sidecar(bufnr, path, murmurs)
+  M.render(bufnr)
+  return true
+end
+
 function M.add_murmur()
   local bufnr = vim.api.nvim_get_current_buf()
-  local path = sidecar_path(bufnr)
-  if not path then
+  if not sidecar_path(bufnr) then
     vim.notify("murmur: buffer has no file path", vim.log.levels.WARN)
     return
   end
-
   vim.ui.input({ prompt = "Instruction for agent: " }, function(input)
     if not input or vim.trim(input) == "" then return end
     vim.schedule(function()
-      sync_back(bufnr)
-      local row = vim.api.nvim_win_get_cursor(0)[1]
-      local anchor = trim(vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or "")
-      local murmurs = mem[bufnr] or {}
-      table.insert(murmurs, {
-        id = gen_id(),
-        line = row,
-        anchor = anchor,
-        author = "User",
-        message = input,
-        created_at = iso_now(),
-        orphaned = false,
-      })
-      sort_murmurs(murmurs)
-      mem[bufnr] = murmurs
-      write_sidecar(bufnr, path, murmurs)
-      M.render(bufnr)
+      M.add({ bufnr = bufnr, author = "User", message = input })
     end)
   end)
 end
