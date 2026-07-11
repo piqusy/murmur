@@ -286,13 +286,23 @@ function M.render(bufnr)
           local linetext = ":" .. tostring(line)
           local linetxt_w = vim.fn.strdisplaywidth(linetext)
           local gap_w = content_w - vim.fn.strdisplaywidth(header_label) + 2
-          local header
+          local right_side
           if linetxt_w + 4 <= gap_w then
-            header = header_label .. string.rep("─", gap_w - linetxt_w - 3) .. " " .. linetext .. " ─╮"
+            right_side = string.rep("─", gap_w - linetxt_w - 3) .. " " .. linetext .. " ─╮"
           else
-            header = header_label .. string.rep("─", gap_w) .. "╮"
+            right_side = string.rep("─", gap_w) .. "╮"
           end
-          local vl = { { { header, header_hl } } }
+          -- build header: border parts are gray, [author] is colored
+          local header_chunks = {
+            { " ╭─ [", "MurmurBorder" },
+            { author, header_hl },
+            { "] ", "MurmurBorder" },
+          }
+          if orphan then
+            table.insert(header_chunks, { "⚠ ORPHANED ", "MurmurOrphan" })
+          end
+          table.insert(header_chunks, { right_side, "MurmurBorder" })
+          local vl = { header_chunks }
           for _, l in ipairs(body_lines) do
             local inner = "  " .. l .. string.rep(" ", content_w - 2 - vim.fn.strdisplaywidth(l))
             table.insert(vl, { { " │", "MurmurBorder" }, { inner, "MurmurBody" }, { "│", "MurmurBorder" } })
