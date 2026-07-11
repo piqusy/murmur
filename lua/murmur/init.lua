@@ -287,7 +287,7 @@ function M.render(bufnr)
           for _, l in ipairs(body_lines) do
             content_w = math.max(content_w, vim.fn.strdisplaywidth(l) + 2)
           end
-          content_w = math.max(28, content_w)
+          content_w = math.max(28, content_w) + 2
           -- header: embed line number on the right when there is room
           local linetext = ":" .. tostring(line)
           local linetxt_w = vim.fn.strdisplaywidth(linetext)
