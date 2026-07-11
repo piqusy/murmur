@@ -122,6 +122,12 @@ local function load_murmurs(bufnr)
       current = (vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1] or "")
     end
 
+    -- backfill anchor for murmurs created by older code
+    if anchor == "" and current ~= "" then
+      m.anchor = current
+      anchor = current
+      changed = true
+    end
     if anchor ~= "" and norm(current) == norm(anchor) then
       -- no drift: anchor matches the stored line
     else
