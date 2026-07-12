@@ -36,6 +36,8 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
     { "<leader>ml", "<cmd>MurmurList<cr>",   desc = "Murmur List" },
     { "<leader>mt", "<cmd>MurmurToggle<cr>", desc = "Murmur Toggle" },
     { "<leader>mm", "<cmd>MurmurMode<cr>",   desc = "Murmur Mode" },
+    { "<leader>mD", "<cmd>MurmurDeleteFile<cr>", desc = "Murmur Delete File" },
+    { "<leader>mA", "<cmd>MurmurDeleteAll<cr>",  desc = "Murmur Delete All" },
   },
 }
 ```
@@ -45,12 +47,14 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
 | Command | Description |
 |---|---|
 | `:MurmurAdd` | Add a murmur on the current line |
-| `:MurmurDelete` | Select and delete a murmur |
+| `:MurmurDelete` | Select and delete a single murmur |
+| `:MurmurDeleteFile` | Delete all murmurs in the current file |
+| `:MurmurDeleteAll` | Delete all murmurs across every open buffer (with confirm) |
 | `:MurmurEdit` | Select and edit a murmur's message |
 | `:MurmurList` | List and jump to a murmur |
 | `:MurmurToggle` | Toggle content visibility (sign stays) |
 | `:MurmurMode` | Toggle box ↔ inline render mode |
-| `:MurmurClear` | Clear all murmur extmarks in the buffer |
+| `:MurmurClear` | Clear all murmur extmarks in the buffer (visual only) |
 
 ## Configuration
 
@@ -68,6 +72,7 @@ require("murmur").setup({
     body   = { fg = "#ebdbb2" },
     border = { fg = "#928374" },
     orphan = { fg = "#fe8019", bold = true },
+    foreign = { fg = "#928374", italic = true }, -- gray, dimmed (diff-view foreign revision)
   },
 })
 ```
@@ -78,6 +83,21 @@ User and agent murmurs are visually distinct: user = teal, agent = purple
 (both sign glyph and header). Author is determined by the `author` field -
 `"User"` gets user styling, anything else gets agent styling.
 
+
+## Diff view support
+
+Murmur resolves diff buffers from both fugitive (`:Gdiff`, `:Gvdiffsplit`) and
+gitsigns (`:Gitsigns diffthis`) to their real source file, so murmurs from the
+working-tree sidecar appear on the staged/HEAD side too. Line differences are
+handled by the existing anchor-based relocation — the anchor text is searched
+in the target buffer and the murmur relocates automatically.
+
+Foreign-revision buffers (staged `//0`, `HEAD`, specific commits) are
+**read-only**: you can see murmurs but not add, edit, or delete them. They
+render with a dimmed gray style and a `⊞ staged` / `⊞ HEAD` badge in the box
+header so you always know which side you're looking at.
+
+To pin or modify murmurs, switch to the worktree buffer (the real file).
 ## AI Harness Integration
 
 Murmur ships a sidecar JSON contract that any agent harness can read and write.
@@ -159,6 +179,21 @@ require("murmur").add({
   bufnr = 0,           -- optional, defaults to current buffer
 })
 ```
+
+Delete all murmurs in a single file (returns count removed):
+
+```lua
+require("murmur").delete_file_murmurs(bufnr) -- bufnr optional, defaults to current
+```
+
+Delete all murmurs across every open buffer (returns total count):
+
+```lua
+require("murmur").delete_all_murmurs()
+```
+
+Both remove the in-memory state, clear visual extmarks, and delete the
+sidecar file — the change persists across restarts.
 
 ### Oh My Pi / Pi
 
@@ -374,7 +409,7 @@ Murmurs are stored in a sidecar file `<original-file>.murmur.json` next to each 
 *.murmur.json
 ```
 
-When a file is opened, the sidecar loads and extmarks are placed at each murmur's line. Extmarks move with text edits automatically. A content anchor (the line's text) lets murmurs re-locate if the file changed externally (e.g. a git pull). If the anchor can't be found within ±20 lines, the murmur is marked orphaned (⚠) for manual review.
+When a file is opened, the sidecar loads and extmarks are placed at each murmur's line. Extmarks move with text edits automatically. A content anchor (the line's text) lets murmurs re-locate if the file changed externally (e.g. a git pull). If the anchor can't be found within ±20 lines, the murmur is marked orphaned (⚠) for manual review. In diff views (fugitive `:Gdiff`), the buffer's pseudo-path is resolved to the real source file so the same sidecar loads on both sides; the non-worktree side is read-only with a dimmed `⊞` badge.
 
 ## Development
 

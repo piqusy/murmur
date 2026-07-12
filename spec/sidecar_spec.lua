@@ -42,3 +42,26 @@ describe("write_sidecar + read_sidecar roundtrip", function()
     assert.is_false(M._write_sidecar(0, nil, {}))
   end)
 end)
+
+describe("write_sidecar empty-data handling", function()
+  it("deletes the sidecar for empty data instead of writing []", function()
+    local tmp = "/tmp/murmur_empty_delete.json"
+    M._write_sidecar(0, tmp, { { id = "x", line = 1, message = "test" } })
+    assert.is_true(vim.fn.filereadable(tmp) == 1)
+    M._write_sidecar(0, tmp, {})
+    assert.is_false(vim.fn.filereadable(tmp) == 1)
+    os.remove(tmp)
+  end)
+
+  it("returns true for empty data with valid path", function()
+    assert.is_true(M._write_sidecar(0, "/tmp/murmur_empty_ok.json", {}))
+  end)
+
+  it("leaves no .tmp artifact after successful write", function()
+    local tmp = "/tmp/murmur_no_tmp.json"
+    M._write_sidecar(0, tmp, { { id = "y", line = 1, message = "z" } })
+    assert.is_false(vim.fn.filereadable(tmp .. ".tmp") == 1)
+    assert.is_true(vim.fn.filereadable(tmp) == 1)
+    os.remove(tmp)
+  end)
+end)

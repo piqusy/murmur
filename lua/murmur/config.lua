@@ -17,6 +17,7 @@ M.defaults = {
     body   = { fg = "#ebdbb2" },
     border = { fg = "#928374" },
     orphan = { fg = "#fe8019", bold = true },
+    foreign = { fg = "#928374", italic = true }, -- gray, dimmed
   },
 }
 
