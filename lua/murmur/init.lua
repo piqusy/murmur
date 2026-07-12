@@ -407,7 +407,6 @@ function M.render(bufnr)
   extmarks[bufnr] = marks
 end
 
--- D4: toggle_mode replaces cycle_mode (box ↔ inline, persists) ---------------
 
 function M.toggle_mode()
   render_mode = render_mode == "box" and "inline" or "box"
@@ -833,7 +832,7 @@ function M.setup(opts)
   end
 end
 
--- D7: expose internals for testability
+-- expose internals for testability
 M._wrap = wrap_text
 M._read_sidecar = read_sidecar
 M._write_sidecar = write_sidecar
