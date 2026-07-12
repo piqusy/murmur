@@ -34,6 +34,7 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
     { "<leader>md", "<cmd>MurmurDelete<cr>", desc = "Murmur Delete" },
     { "<leader>me", "<cmd>MurmurEdit<cr>",   desc = "Murmur Edit" },
     { "<leader>ml", "<cmd>MurmurList<cr>",   desc = "Murmur List" },
+    { "<leader>mL", "<cmd>MurmurListAll<cr>", desc = "Murmur List All" },
     { "<leader>mt", "<cmd>MurmurToggle<cr>", desc = "Murmur Toggle" },
     { "<leader>mm", "<cmd>MurmurMode<cr>",   desc = "Murmur Mode" },
     { "<leader>mD", "<cmd>MurmurDeleteFile<cr>", desc = "Murmur Delete File" },
@@ -51,7 +52,8 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
 | `:MurmurDeleteFile` | Delete all murmurs in the current file |
 | `:MurmurDeleteAll` | Delete all murmurs across every open buffer (with confirm) |
 | `:MurmurEdit` | Select and edit a murmur's message |
-| `:MurmurList` | List and jump to a murmur |
+| `:MurmurList` | List and jump to a murmur (current buffer) |
+| `:MurmurListAll` | List and jump to any murmur in the project (all sidecar files) |
 | `:MurmurToggle` | Toggle content visibility (sign stays) |
 | `:MurmurMode` | Toggle box ↔ inline render mode |
 | `:MurmurClear` | Clear all murmur extmarks in the buffer (visual only) |

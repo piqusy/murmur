@@ -8,6 +8,8 @@
 - Diff view support — fugitive (`:Gdiff`) and gitsigns (`:Gitsigns diffthis`) buffer paths resolved to real source file; murmurs visible on staged/HEAD side via anchor relocation; foreign-revision buffers are read-only with dimmed `⊞` badge
 - `foreign` highlight group for diff-view murmur styling
 - Exposed `M._resolve_source` and `M._load_murmurs` for testability
+- `:MurmurListAll` — list and jump to any murmur in the project (scans all sidecar files, not just current buffer)
+- Gitsigns diff buffer support (`gitsigns://` URI resolution)
 
 ### Fixed
 - `write_sidecar` now deletes the sidecar file for empty data instead of writing `[]` — prevents accidental data loss from empty-table overwrites

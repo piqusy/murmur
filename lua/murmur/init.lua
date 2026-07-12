@@ -565,6 +565,61 @@ function M.list_murmurs()
   end)
 end
 
+-- M.list_all_murmurs: scan all sidecar files in the project, show every murmur
+-- in a picker. On selection, open the file and jump to the line.
+function M.list_all_murmurs()
+  local cwd = vim.fn.getcwd()
+  local suffix = config.options.sidecar_suffix
+  local ignore_dirs = { ".git", "node_modules", ".venv", "vendor", "dist", "build", ".next", ".deps" }
+  local ignore_set = {}
+  for _, d in ipairs(ignore_dirs) do ignore_set[d] = true end
+
+  local sidecars = vim.fs.find(function(name, path)
+    if name:sub(-#suffix) ~= suffix then return false end
+    for seg in (path .. "/" .. name):gmatch("[^/]+") do
+      if ignore_set[seg] then return false end
+    end
+    return true
+  end, { limit = 200, type = "file", path = cwd })
+
+  local results = {}
+  for _, sc in ipairs(sidecars) do
+    local murmurs = read_sidecar(sc)
+    local base = sc:sub(1, -#suffix - 1)
+    local rel = vim.fn.fnamemodify(base, ":.")
+    for _, m in ipairs(murmurs) do
+      table.insert(results, {
+        file = base,
+        line = tonumber(m.line) or 1,
+        text = string.format("%s:%d  [%s] %s", rel, tonumber(m.line) or 0, m.author or "User", m.message or ""),
+      })
+    end
+  end
+
+  if #results == 0 then
+    vim.notify("murmur: no murmurs found in project", vim.log.levels.INFO)
+    return
+  end
+
+  local items = {}
+  for i, r in ipairs(results) do
+    items[i] = { idx = i, text = r.text }
+  end
+  table.sort(items, function(a, b) return a.text < b.text end)
+
+  picker.open(items, { prompt = "All Murmurs (" .. #results .. ")" }, function(idx)
+    if not idx then return end
+    local r = results[idx]
+    if r then
+      vim.schedule(function()
+        vim.cmd("edit " .. vim.fn.fnameescape(r.file))
+        local lc = vim.api.nvim_buf_line_count(0)
+        vim.api.nvim_win_set_cursor(0, { math.max(1, math.min(r.line, lc)), 0 })
+      end)
+    end
+  end)
+end
+
 function M.toggle()
   local bufnr = vim.api.nvim_get_current_buf()
   if visible[bufnr] == false then
@@ -753,6 +808,7 @@ function M.setup(opts)
   end, {})
   vim.api.nvim_create_user_command("MurmurEdit", function() M.edit_murmur() end, {})
   vim.api.nvim_create_user_command("MurmurList", function() M.list_murmurs() end, {})
+  vim.api.nvim_create_user_command("MurmurListAll", function() M.list_all_murmurs() end, {})
   vim.api.nvim_create_user_command("MurmurToggle", function() M.toggle() end, {})
   vim.api.nvim_create_user_command("MurmurMode", function() M.toggle_mode() end, {})
   vim.api.nvim_create_user_command("MurmurClear", function()
