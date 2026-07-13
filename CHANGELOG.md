@@ -1,6 +1,8 @@
 # Changelog
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-13
+
 ### Added
 - `:MurmurDeleteFile` — delete all murmurs in the current file (persistent)
 - `:MurmurDeleteAll` — delete all murmurs across every open buffer (with confirm)
