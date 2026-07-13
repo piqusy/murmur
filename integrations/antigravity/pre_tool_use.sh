@@ -6,6 +6,7 @@
 # with the formatted constraints as additionalContext.
 
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -57,6 +58,8 @@ CONSTRAINTS=$(echo "$MURMURS" | jq -r '
 BLOCK=$(cat <<EOF
 Murmurs for $FILE_PATH — user-pinned constraints you must honor:
 $CONSTRAINTS
+
+To add or delete murmurs: "${SCRIPT_DIR}/murmur.sh" {add|delete-file|delete-all}
 EOF
 )
 

@@ -197,15 +197,43 @@ require("murmur").delete_all_murmurs()
 Both remove the in-memory state, clear visual extmarks, and delete the
 sidecar file — the change persists across restarts.
 
+### Writing murmurs (agent tools)
+
+Dedicated tools handle UUID generation, ISO timestamps, anchor extraction, and
+read-before-write — so agents don't manipulate sidecar JSON directly.
+
+**OMP** — three registered tools:
+
+| Tool | Parameters | Effect |
+|---|---|---|
+| `add_murmur` | `filepath`, `line`, `author`, `message` | Append a murmur to the file's sidecar |
+| `delete_file_murmurs` | `filepath` | Remove the file's sidecar |
+| `delete_all_murmurs` | `dir?` (defaults to cwd) | Remove all sidecars in the project |
+
+**OpenCode** — same three tools, registered as separate files in `.opencode/tools/`:
+`add_murmur.ts`, `delete_file_murmurs.ts`, `delete_all_murmurs.ts`.
+
+**Claude Code / Codex / Antigravity** — a CLI script the agent invokes via its
+shell tool:
+
+```bash
+murmur.sh add src/auth.ts 42 Claude "Refactored — see commit abc123"
+murmur.sh delete-file src/auth.ts
+murmur.sh delete-all .
+```
+
+Install `murmur.sh` alongside the PreToolUse hook (see per-harness instructions
+below). The hook output includes the CLI path when murmurs exist.
+
 ### Oh My Pi / Pi
 
 An [echo extension](https://github.com/mariozechner/pi-coding-agent) registers
-three delivery paths. The extension ships in this repo at
+read hooks and write tools. The extension ships in this repo at
 [`integrations/omp/`](integrations/omp/):
 
 | File | Installs to | Purpose |
 |---|---|---|
-| [`integrations/omp/index.ts`](integrations/omp/index.ts) | `~/.omp/agent/extensions/murmur/index.ts` | Echo extension: `before_agent_start` hook + `read_murmur` tool + `/murmur-scan` command |
+| [`integrations/omp/index.ts`](integrations/omp/index.ts) | `~/.omp/agent/extensions/murmur/index.ts` | Echo extension: `before_agent_start` hook + `read_murmur`/`add_murmur`/`delete_file_murmurs`/`delete_all_murmurs` tools + `/murmur-scan` command |
 | [`integrations/omp/package.json`](integrations/omp/package.json) | `~/.omp/agent/extensions/murmur/package.json` | Extension manifest (`"pi": {"extensions": ["./index.ts"]}`) |
 
 **What it does:**
@@ -224,6 +252,13 @@ three delivery paths. The extension ships in this repo at
 
 3. **`/murmur-scan` slash command** — manual rescan that reports how many
    sidecar files exist in the project.
+
+4. **`add_murmur` tool** (write) — appends a murmur to a file's sidecar with
+   automatic UUID, timestamp, and anchor extraction. The Neovim file watcher
+   re-renders on change.
+
+5. **`delete_file_murmurs` / `delete_all_murmurs` tools** (write) — remove a
+   single file's sidecar or all sidecars in the project.
 
 To install, symlink from your clone of this repo:
 
@@ -254,6 +289,8 @@ The hook ships in this repo at
 - Returns the block as `hookSpecificOutput.additionalContext` so Claude Code
   sees it as a constraint before writing
 - Silently exits when no sidecar exists — zero overhead per call
+- Includes the `murmur.sh` CLI path in the output so the agent can add or
+  delete murmurs via its shell tool
 
 To install, symlink the hook into your Claude config and register it:
 
@@ -262,6 +299,8 @@ To install, symlink the hook into your Claude config and register it:
 mkdir -p ~/.claude/hooks/murmur
 ln -s ~/src/murmur/integrations/claude-code/pre_tool_use.sh \
       ~/.claude/hooks/murmur/pre_tool_use.sh
+ln -s ~/src/murmur/integrations/shared/murmur.sh \
+      ~/.claude/hooks/murmur/murmur.sh
 ```
 
 Then add this to your `~/.claude/settings.json` or
@@ -290,14 +329,17 @@ filters internally as a safety net). Use an absolute path to the hook script.
 
 ### OpenCode
 
-A [custom tool](https://opencode.ai/docs/custom-tools/) registers a
-`read_murmur` tool the agent calls before modifying files. The tool ships in
-this repo at [`integrations/opencode/read_murmur.ts`](integrations/opencode/read_murmur.ts).
+A [custom tool](https://opencode.ai/docs/custom-tools/) registers `read_murmur`,
+`add_murmur`, `delete_file_murmurs`, and `delete_all_murmurs` tools. The tools
+ship in this repo at [`integrations/opencode/`](integrations/opencode/).
 
 **What it does:**
-- Registers a `read_murmur` tool via `@opencode-ai/plugin`'s `tool()` helper
-- Checks for a sidecar at `<filepath>.murmur.json` relative to the project directory
-- Returns formatted murmurs or `"No murmurs for <file>. Clear to edit."`
+- Registers tools via `@opencode-ai/plugin`'s `tool()` helper
+- `read_murmur` — checks for a sidecar at `<filepath>.murmur.json` and returns
+  formatted murmurs or `"No murmurs for <file>. Clear to edit."`
+- `add_murmur` — appends a murmur with automatic UUID, timestamp, and anchor
+- `delete_file_murmurs` — removes a single file's sidecar
+- `delete_all_murmurs` — removes all sidecars in the project
 
 To install, copy from your clone of this repo (symlinking won't work —
 OpenCode resolves `@opencode-ai/plugin` from the file's real path):
@@ -306,18 +348,20 @@ OpenCode resolves `@opencode-ai/plugin` from the file's real path):
 # Replace ~/src/murmur with your clone path
 # Project-level (per-project)
 mkdir -p .opencode/tools
-cp ~/src/murmur/integrations/opencode/read_murmur.ts .opencode/tools/read_murmur.ts
+cp ~/src/murmur/integrations/opencode/*.ts .opencode/tools/
 
 # Or global (all projects)
 mkdir -p ~/.config/opencode/tools
-cp ~/src/murmur/integrations/opencode/read_murmur.ts ~/.config/opencode/tools/read_murmur.ts
+cp ~/src/murmur/integrations/opencode/*.ts ~/.config/opencode/tools/
 ```
 
 Then add this to your `AGENTS.md` so the agent knows to use it:
 
 ```markdown
 Before editing any file, call `read_murmur` with the filepath to check for
-user-pinned line constraints. Honor any murmurs returned.
+user-pinned line constraints. Honor any murmurs returned. To leave a murmur on
+a line, use `add_murmur`. To remove murmurs, use `delete_file_murmurs` or
+`delete_all_murmurs`.
 ```
 
 ### Codex CLI
@@ -332,6 +376,8 @@ The hook ships in this repo at
 - Reads `<target-file>.murmur.json` and returns formatted constraints as
   `hookSpecificOutput.additionalContext`
 - Silently exits when no sidecar exists — zero overhead per call
+- Includes the `murmur.sh` CLI path in the output so the agent can add or
+  delete murmurs via its shell tool
 
 **Prerequisite:** Enable hooks in `~/.codex/config.toml`:
 
@@ -346,6 +392,7 @@ To install, copy the hook script and merge the hooks config:
 # Replace ~/src/murmur with your clone path
 mkdir -p ~/.codex/hooks/murmur
 cp ~/src/murmur/integrations/codex/pre_tool_use.sh ~/.codex/hooks/murmur/pre_tool_use.sh
+cp ~/src/murmur/integrations/shared/murmur.sh ~/.codex/hooks/murmur/murmur.sh
 ```
 
 Then add the `PreToolUse` entry to `~/.codex/hooks.json` (merge with existing
@@ -365,12 +412,15 @@ before file-modifying tool calls. The plugin ships in this repo at
 - Triggers before `Edit` / `Write` / `MultiEdit` tool calls
 - Reads `<target-file>.murmur.json` and returns formatted constraints as
   `hookSpecificOutput.additionalContext`
+- Includes the `murmur.sh` CLI path in the output so the agent can add or
+  delete murmurs via its shell tool
 
 To install, copy the plugin directory and install it:
 
 ```bash
 # Replace ~/src/murmur with your clone path
 cp -r ~/src/murmur/integrations/antigravity ~/.config/agy/plugins/murmur
+cp ~/src/murmur/integrations/shared/murmur.sh ~/.config/agy/plugins/murmur/murmur.sh
 
 # Edit hooks.json to use the absolute path to pre_tool_use.sh, then:
 agy plugin install ~/.config/agy/plugins/murmur
@@ -388,10 +438,12 @@ support in three steps:
 2. **Inject all project murmurs** at session start by globbing
    `**/*.murmur.json` (skipping `node_modules`, `.git`, `.venv`, `vendor`,
    `dist`, `build`, `.next`)
-3. **Write murmurs** by appending new objects to the sidecar JSON array
+3. **Write murmurs** by appending new objects to the sidecar JSON array, or
+   use the shared `murmur.sh` CLI (`integrations/shared/murmur.sh`) for robust
+   UUID/timestamp/anchor handling
 
-The sidecar contract in this section is the only integration surface — no
-plugin installation, no Neovim RPC, no external dependencies.
+The sidecar contract is the universal integration surface — no Neovim RPC, no
+external dependencies. The CLI and native tools are conveniences on top.
 
 ### Global gitignore
 

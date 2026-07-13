@@ -10,6 +10,9 @@
 - Exposed `M._resolve_source` and `M._load_murmurs` for testability
 - `:MurmurListAll` — list and jump to any murmur in the project (scans all sidecar files, not just current buffer)
 - Gitsigns diff buffer support (`gitsigns://` URI resolution)
+- Agent write tools — `add_murmur`, `delete_file_murmurs`, `delete_all_murmurs` registered as native tools in OMP and OpenCode integrations
+- Shared CLI (`integrations/shared/murmur.sh`) for hook-based harnesses (Claude Code, Codex, Antigravity) — agents invoke via shell tool to add/delete murmurs
+- PreToolUse hooks now include the `murmur.sh` CLI path in their output when murmurs exist
 
 ### Fixed
 - `write_sidecar` now deletes the sidecar file for empty data instead of writing `[]` — prevents accidental data loss from empty-table overwrites
@@ -30,8 +33,8 @@
 - User (teal) vs agent (purple) visual distinction
 
 ### Integrations
-- **Oh My Pi / Pi** — Echo extension with `before_agent_start` auto-inject, `read_murmur` tool, and `/murmur-scan` slash command
-- **Claude Code** — `PreToolUse` hook injecting sidecar constraints as `additionalContext` before file edits
-- **OpenCode** — Custom `read_murmur` tool using `@opencode-ai/plugin`'s `tool()` helper
-- **Codex CLI** — `PreToolUse` lifecycle hook (same format as Claude Code)
-- **Antigravity CLI** — Plugin with `PreToolUse` hook
+- **Oh My Pi / Pi** — Echo extension with `before_agent_start` auto-inject, `read_murmur`/`add_murmur`/`delete_file_murmurs`/`delete_all_murmurs` tools, and `/murmur-scan` slash command
+- **Claude Code** — `PreToolUse` hook injecting sidecar constraints as `additionalContext` before file edits + `murmur.sh` CLI for writes
+- **OpenCode** — Custom `read_murmur`, `add_murmur`, `delete_file_murmurs`, `delete_all_murmurs` tools using `@opencode-ai/plugin`'s `tool()` helper
+- **Codex CLI** — `PreToolUse` lifecycle hook + `murmur.sh` CLI for writes
+- **Antigravity CLI** — Plugin with `PreToolUse` hook + `murmur.sh` CLI for writes
