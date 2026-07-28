@@ -1,5 +1,14 @@
 # Changelog
-## [Unreleased]
+## [0.3.0] — 2026-07-28
+
+### Added
+- Shared Murmur read core (`integrations/shared/murmur-core.ts`) used by OMP and OpenCode integrations — single parser/scanner/formatter for sidecars.
+- `read_murmurs` (OMP and OpenCode) — batch read of one or more file sidecars with per-file status (`annotated` | `clear` | `invalid_sidecar` | `missing_source`).
+- `scan_murmurs` (OMP and OpenCode) — refresh a project murmur index without restarting the session.
+- OMP `tool_call` preflight — every `edit` / `write` / `multiedit` / `read` tool call now auto-injects only the murmurs whose sidecar hash changed since `before_agent_start`, including multi-file hashline edits.
+
+### Fixed
+- Invalidate OMP's startup murmur cache whenever `add_murmur` / `delete_file_murmurs` / `delete_all_murmurs` mutate the project; otherwise the preflight would skip the very change it just wrote.
 
 ## [0.2.0] — 2026-07-13
 
@@ -27,7 +36,7 @@
 ### Added
 - Sidecar JSON storage (`<file>.murmur.json`) with line-drift tracking via content anchors
 - Box rendering mode — closed `╭─│─╰` frame with author, message, and source line number
-- Inline rendering mode — compact EOL shadow text (`Author: message`)
+- Inline rendering mode — compact end-of-line shadow text (`Author: message`)
 - Persistent sign-column indicator (`◉`)
 - Content wrapping for long messages (box mode)
 - Pluggable picker — snacks / telescope / fzf-lua / builtin `vim.ui.select`

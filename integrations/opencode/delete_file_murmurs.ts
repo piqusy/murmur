@@ -1,16 +1,13 @@
 import { tool } from "@opencode-ai/plugin"
 import * as fs from "node:fs"
 import * as path from "node:path"
-
-const SIDECAR_SUFFIX = ".murmur.json"
+import { SIDECAR_SUFFIX } from "../../shared/murmur-core.ts"
 
 export default tool({
   description:
     "Delete all murmurs in a single file by removing its sidecar. Returns the count of murmurs removed.",
   args: {
-    filepath: tool.schema
-      .string()
-      .describe("Absolute or relative path of the file whose murmurs to delete"),
+    filepath: tool.schema.string().describe("Absolute or relative path of the file whose murmurs to delete"),
   },
   async execute(args, context) {
     const abs = path.isAbsolute(args.filepath)
@@ -23,9 +20,8 @@ export default tool({
       const raw = JSON.parse(fs.readFileSync(sidecar, "utf-8"))
       if (Array.isArray(raw)) count = raw.length
     } catch {
-      // no sidecar or corrupt JSON — count stays 0
+      // corrupt or missing
     }
-
     try {
       fs.unlinkSync(sidecar)
     } catch {

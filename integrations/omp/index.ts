@@ -3,139 +3,219 @@ import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  formatMurmurBatch,
+  getMurmurSidecarFingerprint,
+  isMurmurArray,
+  readMurmurFiles,
+  scanMurmurFiles,
+  SIDECAR_SUFFIX,
+  type Murmur,
+} from "../shared/murmur-core.ts";
 
-// Directories never scanned for .murmur.json sidecars.
-const IGNORE_DIRS: Record<string, true> = {
-  ".git": true,
-  "node_modules": true,
-  ".venv": true,
-  "vendor": true,
-  "dist": true,
-  "build": true,
-  ".next": true,
-};
+// File-modifying tools whose arguments we should preflight for murmurs.
+const FILE_WRITING_TOOL_NAMES = new Set<string>([
+  "edit",
+  "write",
+  "multiedit",
+  "read",
+]);
 
-const SIDECAR_SUFFIX = ".murmur.json";
-// Max path depth (dir segments + filename) for a sidecar to be auto-injected.
-const MAX_DEPTH = 6;
+type FileWritingToolName = "edit" | "write" | "multiedit" | "read";
 
-interface Murmur {
-  id?: string;
-  line?: number;
-  anchor?: string;
-  author?: string;
-  message?: string;
-  created_at?: string;
-  orphaned?: boolean;
+interface FileWritingInput {
+  toolName: FileWritingToolName;
+  input: Record<string, unknown>;
 }
 
-// Validate that parsed sidecar JSON is an array of murmur-shaped objects.
-function isMurmurArray(value: unknown): value is Murmur[] {
-  if (!Array.isArray(value)) return false;
-  return value.every(
-    (item): item is Murmur => item !== null && typeof item === "object",
-  );
+function isFileWritingToolName(value: string): value is FileWritingToolName {
+  return (FILE_WRITING_TOOL_NAMES as ReadonlySet<string>).has(value);
 }
 
-function globMurmurs(root: string): string[] {
-  let entries: string[];
+function readStringField(input: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return null;
+}
+
+function readPathListField(input: Record<string, unknown>, keys: string[]): string[] {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim().length > 0) return [value];
+    if (Array.isArray(value)) {
+      const paths = value.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+      );
+      if (paths.length > 0) return paths;
+    }
+  }
+  return [];
+}
+
+function getModifiedFilepathsFromEditInput(input: Record<string, unknown>): string[] {
+  // hashline multi-section inputs embed paths in bracketed [PATH#TAG] headers.
+  const editInput = typeof input.input === "string" ? input.input : "";
+  if (editInput.includes("[")) {
+    const headers = [...editInput.matchAll(/^\[([^\]\r\n]+)\]/gm)].map((match) => match[1].trim());
+    if (headers.length > 0) {
+      return headers
+        .map((header) => header.replace(/#.*$/, ""))
+        .filter((path) => path.length > 0);
+    }
+  }
+
+  return readPathListField(input, ["path", "file_path", "filepath"]);
+}
+
+function getModifiedFilepaths(
+  toolName: string,
+  input: Record<string, unknown>,
+): string[] {
+  if (!isFileWritingToolName(toolName)) return [];
+  switch (toolName) {
+    case "edit":
+      return getModifiedFilepathsFromEditInput(input);
+    case "write":
+      return readPathListField(input, ["path", "file_path", "filepath"]);
+    case "multiedit":
+      return readPathListField(input, ["edits", "files", "patches"]);
+    case "read":
+      return readPathListField(input, ["path", "file_path", "filepath"]);
+  }
+}
+
+function getSidecarFingerprint(absolutePath: string): string {
   try {
-    entries = fs.readdirSync(root, { recursive: true }) as string[];
+    return getMurmurSidecarFingerprint(absolutePath);
   } catch {
-    return [];
+    return "absent";
   }
-  const out: string[] = [];
-  for (const entry of entries) {
-    if (typeof entry !== "string") continue;
-    if (!entry.endsWith(SIDECAR_SUFFIX)) continue;
-    const segs = entry.split(path.sep);
-    if (segs.length > MAX_DEPTH) continue;
-    if (segs.some((s) => IGNORE_DIRS[s])) continue;
-    out.push(path.join(root, entry));
-  }
-  return out;
-}
-
-function formatSidecar(sidecarPath: string, cwd: string): string | null {
-  const base = sidecarPath.slice(0, -SIDECAR_SUFFIX.length);
-  if (!fs.existsSync(base)) return null; // source file deleted → orphan sidecar
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(sidecarPath, "utf-8"));
-  } catch {
-    return null;
-  }
-  if (!isMurmurArray(raw) || raw.length === 0) return null;
-  const murmurs = raw;
-  const rel = path.relative(cwd, base) || base;
-  const lines = murmurs.map((m) =>
-    `- ${rel}:${m.line ?? "?"} [${m.author ?? "User"}] ${m.message ?? ""} (anchored: "${(m.anchor ?? "").trim()}")`,
-  );
-  return lines.join("\n");
 }
 
 export default function murmurExtension(pi: ExtensionAPI): void {
-  // Auto-inject every project murmur into the system prompt at session start.
-  // This is the reliable delivery path — the agent cannot skip it.
+  const deliveredSidecarFingerprints = new Map<string, string>();
+
   pi.on("before_agent_start", async (event) => {
     const cwd = event.systemPromptOptions?.cwd || process.cwd();
-    const sidecars = globMurmurs(cwd);
-    const blocks: string[] = [];
-    for (const sc of sidecars) {
-      const block = formatSidecar(sc, cwd);
-      if (block) blocks.push(block);
+    const result = scanMurmurFiles(cwd);
+    const annotatedFiles = result.files.filter((file) => file.status === "annotated");
+    if (annotatedFiles.length === 0) return;
+
+    for (const file of annotatedFiles) {
+      deliveredSidecarFingerprints.set(
+        file.absolutePath,
+        getSidecarFingerprint(file.absolutePath),
+      );
     }
-    if (blocks.length === 0) return; // zero noise when no murmurs exist
+
     const block = [
       "Murmurs — user-pinned line constraints in this project. Honor these when editing the named files:",
-      ...blocks,
+      formatMurmurBatch({ ...result, files: annotatedFiles }),
     ].join("\n");
     return {
       systemPrompt: [event.systemPrompt, block].filter(Boolean).join("\n\n"),
     };
   });
 
-  // Per-file lookup — fallback for murmurs added mid-session after before_agent_start fired.
+  pi.on("tool_call", async (event, ctx) => {
+    const filepaths = getModifiedFilepaths(event.toolName, event.input as Record<string, unknown>);
+    if (filepaths.length === 0) return;
+
+    const cwd = ctx.cwd || process.cwd();
+    const result = readMurmurFiles(filepaths, cwd);
+    const freshFiles = result.files.filter((file) => {
+      if (file.status !== "annotated") return false;
+      return deliveredSidecarFingerprints.get(file.absolutePath) !== getSidecarFingerprint(file.absolutePath);
+    });
+
+    if (freshFiles.length === 0) return;
+    return { additionalContext: formatMurmurBatch({ ...result, files: freshFiles }) };
+  });
+
+  // Per-file lookup — fallback for agents that want to inspect a specific file.
   pi.registerTool({
     name: "read_murmur",
     label: "Read Murmurs",
     description:
-      "Read user-pinned line constraints for a file before editing it. Always call before modifying a file.",
+      "Read user-pinned line constraints for a single file. Prefer read_murmurs for batch lookups; this tool is kept for one-file callers and remains backwards compatible.",
     parameters: Type.Object({
       filepath: Type.String({
         description: "Absolute or relative path of the file you intend to modify",
       }),
     }),
     async execute(_toolCallId, params) {
-      const abs = path.isAbsolute(params.filepath)
-        ? params.filepath
-        : path.resolve(process.cwd(), params.filepath);
-      const sidecar = abs + SIDECAR_SUFFIX;
-      if (!fs.existsSync(sidecar)) {
+      const [result] = readMurmurFiles([params.filepath]).files;
+      if (!result || result.status === "annotated") {
+        const text = result && result.status === "annotated"
+          ? `Murmurs for ${result.path}:\n${formatMurmurBatch({ root: result.absolutePath, files: [result], annotatedFileCount: 1, murmurCount: result.murmurs.length })}`
+          : `No murmurs for ${params.filepath}. Clear to edit.`;
         return {
-          content: [{ type: "text" as const, text: `No murmurs for ${params.filepath}. Clear to edit.` }],
-          details: { ok: true, murmurs: [] },
+          content: [{ type: "text" as const, text }],
+          details: result
+            ? { ok: true, status: result.status, murmurs: result.murmurs }
+            : { ok: true, status: "clear", murmurs: [] },
         };
       }
-      let raw: unknown;
-      try {
-        raw = JSON.parse(fs.readFileSync(sidecar, "utf-8"));
-      } catch {
-        raw = [];
-      }
-      if (!isMurmurArray(raw) || raw.length === 0) {
-        return {
-          content: [{ type: "text" as const, text: `No murmurs for ${params.filepath}. Clear to edit.` }],
-          details: { ok: true, murmurs: [] },
-        };
-      }
-      const murmurs = raw;
-      const lines = murmurs
-        .map((m) => `- L${m.line ?? "?"} [${m.author ?? "User"}] ${m.message ?? ""} (anchored: "${(m.anchor ?? "").trim()}")`)
-        .join("\n");
       return {
-        content: [{ type: "text" as const, text: `Murmurs for ${params.filepath}:\n${lines}` }],
-        details: { ok: true, murmurs },
+        content: [{ type: "text" as const, text: `No murmurs for ${params.filepath}. Clear to edit.` }],
+        details: { ok: true, status: result.status, murmurs: [] },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "read_murmurs",
+    label: "Read Murmurs (Batch)",
+    description:
+      "Read user-pinned line constraints for one or more files. Returns per-file status (annotated | clear | invalid_sidecar | missing_source) and murmurs in a single call. Use this in preference to multiple read_murmur calls.",
+    parameters: Type.Object({
+      paths: Type.Array(Type.String(), {
+        description: "Absolute or relative file paths to inspect (duplicates deduped)",
+      }),
+    }),
+    async execute(_toolCallId, params) {
+      const result = readMurmurFiles(params.paths);
+      return {
+        content: [{ type: "text" as const, text: formatMurmurBatch(result) }],
+        details: {
+          ok: true,
+          root: result.root,
+          files: result.files,
+          annotatedFileCount: result.annotatedFileCount,
+          murmurCount: result.murmurCount,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "scan_murmurs",
+    label: "Scan Murmurs",
+    description:
+      "Scan a project directory for every murmur sidecar. Use this to refresh the project murmur index when sidecars change outside the agent's reach.",
+    parameters: Type.Object({
+      dir: Type.Optional(
+        Type.String({ description: "Root directory to scan (defaults to cwd)" }),
+      ),
+      maxDepth: Type.Optional(
+        Type.Integer({ description: "Max directory depth (default: unbounded)" }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const result = scanMurmurFiles(params.dir || process.cwd(), {
+        ...(params.maxDepth !== undefined ? { maxDepth: params.maxDepth } : {}),
+      });
+      return {
+        content: [{ type: "text" as const, text: formatMurmurBatch(result) }],
+        details: {
+          ok: true,
+          root: result.root,
+          files: result.files,
+          annotatedFileCount: result.annotatedFileCount,
+          murmurCount: result.murmurCount,
+        },
       };
     },
   });
@@ -145,7 +225,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
     name: "add_murmur",
     label: "Add Murmur",
     description:
-      "Add a line annotation (murmur) to a file's sidecar. Generates UUID, timestamp, and line anchor automatically. The Neovim file watcher re-renders on change — no RPC needed.",
+      "Add a line annotation (murmur) to a file's sidecar. Generates UUID, timestamp, and anchor automatically. The Neovim file watcher re-renders on change — no RPC needed.",
     parameters: Type.Object({
       filepath: Type.String({
         description: "Absolute or relative path of the file to annotate",
@@ -166,7 +246,6 @@ export default function murmurExtension(pi: ExtensionAPI): void {
         : path.resolve(process.cwd(), params.filepath);
       const sidecar = abs + SIDECAR_SUFFIX;
 
-      // Read source file for anchor (trimmed text of the target line)
       let anchor = "";
       try {
         const content = fs.readFileSync(abs, "utf-8");
@@ -179,7 +258,6 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       const id = randomUUID();
       const ts = new Date().toISOString();
 
-      // Read existing murmurs (read-before-write discipline)
       let murmurs: Murmur[] = [];
       try {
         const raw = JSON.parse(fs.readFileSync(sidecar, "utf-8"));
@@ -188,7 +266,6 @@ export default function murmurExtension(pi: ExtensionAPI): void {
         // no existing sidecar or corrupt JSON — start fresh
       }
 
-      // Append, sort by line, write atomically
       murmurs.push({
         id,
         line: params.line,
@@ -203,6 +280,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       const tmp = sidecar + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(murmurs, null, 2));
       fs.renameSync(tmp, sidecar);
+      deliveredSidecarFingerprints.set(abs, getSidecarFingerprint(abs));
 
       return {
         content: [{ type: "text" as const, text: `Added murmur at ${params.filepath}:${params.line} [${params.author}] ${params.message}` }],
@@ -211,7 +289,6 @@ export default function murmurExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Delete all murmurs in a single file (removes the sidecar).
   pi.registerTool({
     name: "delete_file_murmurs",
     label: "Delete File Murmurs",
@@ -240,6 +317,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       } catch {
         // already gone
       }
+      deliveredSidecarFingerprints.delete(abs);
 
       return {
         content: [{ type: "text" as const, text: count > 0 ? `Deleted ${count} murmur(s) from ${params.filepath}` : `No murmurs found for ${params.filepath}` }],
@@ -248,29 +326,29 @@ export default function murmurExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // Delete all murmur sidecars in the project.
   pi.registerTool({
     name: "delete_all_murmurs",
     label: "Delete All Murmurs",
     description:
       "Delete all murmur sidecar files in the project. Returns the total count of files removed.",
     parameters: Type.Object({
-      dir: Type.Optional(Type.String({
-        description: "Root directory to scan (defaults to cwd)",
-      })),
+      dir: Type.Optional(
+        Type.String({ description: "Root directory to scan (defaults to cwd)" }),
+      ),
     }),
     async execute(_toolCallId, params) {
       const dir = params.dir || process.cwd();
-      const sidecars = globMurmurs(dir);
+      const result = scanMurmurFiles(dir);
       let count = 0;
-      for (const sc of sidecars) {
+      for (const file of result.files) {
         try {
-          fs.unlinkSync(sc);
-          count++;
+          fs.unlinkSync(file.absolutePath + SIDECAR_SUFFIX);
+          count += 1;
         } catch {
           // ignore individual failures
         }
       }
+      deliveredSidecarFingerprints.clear();
 
       return {
         content: [{ type: "text" as const, text: `Deleted ${count} sidecar file(s) under ${dir}` }],
@@ -278,14 +356,17 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       };
     },
   });
-  // Manual rescan slash command (mirrors agentmemory-status pattern).
+
   pi.registerCommand("murmur-scan", {
     description: "Scan the project for .murmur.json sidecars and report the count",
     handler: async (_args, ctx) => {
       const cwd = process.cwd();
-      const sidecars = globMurmurs(cwd);
+      const result = scanMurmurFiles(cwd);
+      const annotated = result.files.filter((file) => file.status === "annotated").length;
       ctx.ui.notify(
-        sidecars.length > 0 ? `Found ${sidecars.length} murmur sidecar(s)` : "No murmur sidecars found",
+        annotated > 0
+          ? `Found ${result.files.length} murmur sidecar(s) (${annotated} annotated)`
+          : `No murmur sidecars found`,
         "info",
       );
     },
