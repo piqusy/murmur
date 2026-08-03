@@ -1,5 +1,18 @@
 # Changelog
-## [Unreleased]
+## [0.3.2] — 2026-08-03
+
+### Fixed
+- Mirror workflow (`mirror-lua.yml`) Layer step now uses `git add -A` instead of per-path `git add` with error-swallowing — new directories (`lua/`, `spec/`) were silently skipped, causing the mirror to publish empty content.
+
+### Changed
+- Mirror workflow supports `workflow_dispatch` with explicit `version` input (validated against `vMAJOR.MINOR.PATCH`) — `github.ref_name` is empty on manual dispatch, so backfilling a tag no longer requires re-pushing it.
+- Mirror workflow resolves version once via a dedicated step and passes it as env to downstream steps.
+
+### Added
+- README Quick Start section: 4-step install + harness comparison table (auto-inject ✅ vs manual ⚠️) + verify step.
+- README Troubleshooting / FAQ table (8 common issues with fixes).
+- README v0.3.1 callout for `murmur.sh scan` / `murmur.sh list` (proactive project-wide index).
+
 
 ## [0.3.1] — 2026-07-29
 

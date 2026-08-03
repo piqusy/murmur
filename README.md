@@ -2,6 +2,38 @@
 
 Inline line annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
 
+## Quick Start
+
+**Two minutes to working murmurs:**
+
+1. **Install the Neovim plugin** (lazy.nvim example):
+   ```lua
+   { "piqusy/murmur", event = "VeryLazy", config = function() require("murmur").setup() end }
+   ```
+   *Other managers: [packer](https://github.com/wbthomason/packer.nvim) `use "piqusy/murmur"`, [vim-plug](https://github.com/junegunn/vim-plug) `Plug 'piqusy/murmur'`, [minpac](https://github.com/k-takata/minpac) `call minpac#add('piqusy/murmur')`*
+
+2. **Ignore sidecar files globally** (one-time, prevents accidental commits):
+   ```bash
+   echo "*.murmur.json" >> ~/.gitignore_global
+   git config --global core.excludesfile ~/.gitignore_global
+   ```
+
+3. **Pick ONE AI harness integration** — install the matching hook/tools:
+
+   | Harness | Install | Auto-injects murmurs? |
+   |---|---|---|
+   | **Oh My Pi / Pi** | `mkdir -p ~/.omp/agent/extensions/murmur && ln -s /path/to/murmur/integrations/omp/index.ts ~/.omp/agent/extensions/murmur/ && ln -s /path/to/murmur/integrations/omp/package.json ~/.omp/agent/extensions/murmur/` | ✅ Yes — scans ALL project murmurs at session start |
+   | **Claude Code** | Symlink `integrations/claude-code/pre_tool_use.sh` + `integrations/shared/murmur.sh` to `~/.claude/hooks/murmur/`, add to `settings.json` | ✅ Yes — `PreToolUse` hook before every edit |
+   | **Codex** | Enable hooks in `~/.codex/config.toml`, copy hook + `murmur.sh` to `~/.codex/hooks/murmur/`, add to `hooks.json` | ✅ Yes — `PreToolUse` hook before edits |
+   | **Antigravity** | `cp -r integrations/antigravity ~/.config/agy/plugins/murmur && agy plugin install ~/.config/agy/plugins/murmur` | ✅ Yes — plugin `PreToolUse` hook |
+   | **OpenCode** | Copy `integrations/opencode/*.ts` to `.opencode/tools/` or `~/.config/opencode/tools/`, add rule to `AGENTS.md` | ⚠️ Manual — agent must call `read_murmur` explicitly |
+
+   > **Replace `/path/to/murmur`** with your local clone of this repo (e.g. `~/src/murmur` or `~/development/murmur`).
+
+4. **Verify**: Open a file, run `:MurmurAdd`, type a message. You'll see a teal `◉` sign and a boxed annotation. Ask your agent to edit that file — it will see your murmur.
+
+---
+
 ## Features
 
 - **Box mode** - closed `╭─│─╰` frame with author, message, and source line number
@@ -222,7 +254,10 @@ murmur.sh delete-file src/auth.ts
 murmur.sh delete-all .
 murmur.sh scan .          # project-wide read, alias: list — the PreToolUse
                           # hook is reactive (per file, on edit); this isn't
+murmur.sh list .          # alias for scan
 ```
+
+> **New in v0.3.1**: `murmur.sh scan` (alias `list`) gives agents a proactive project-wide murmur index — the PreToolUse hook only surfaces murmurs reactively, per file, on edit. Use this for on-demand full-project reads.
 
 Install `murmur.sh` alongside the PreToolUse hook (see per-harness instructions
 below). The hook output includes the CLI path when murmurs exist.
@@ -447,15 +482,6 @@ support in three steps:
 The sidecar contract is the universal integration surface — no Neovim RPC, no
 external dependencies. The CLI and native tools are conveniences on top.
 
-### Global gitignore
-
-Sidecar files are local-only metadata. Ensure they never reach the repository:
-
-```gitignore
-# ~/.gitignore_global
-*.murmur.json
-```
-
 ## How it works
 
 Murmurs are stored in a sidecar file `<original-file>.murmur.json` next to each annotated file. Add `*.murmur.json` to your global gitignore so they never get committed:
@@ -465,19 +491,20 @@ Murmurs are stored in a sidecar file `<original-file>.murmur.json` next to each 
 *.murmur.json
 ```
 
-When a file is opened, the sidecar loads and extmarks are placed at each murmur's line. Extmarks move with text edits automatically. A content anchor (the line's text) lets murmurs re-locate if the file changed externally (e.g. a git pull). If the anchor can't be found within ±20 lines, the murmur is marked orphaned (⚠) for manual review. In diff views (fugitive `:Gdiff`), the buffer's pseudo-path is resolved to the real source file so the same sidecar loads on both sides; the non-worktree side is read-only with a dimmed `⊞` badge.
+## Troubleshooting / FAQ
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `:MurmurAdd` does nothing / no `◉` sign | Plugin not loaded or `setup()` not called | Ensure `require("murmur").setup()` runs; check `:Lazy` or `:PackerCompile` |
+| Agent says "Clear to edit" but murmurs exist in Neovim | Harness hook not firing or wrong file path | Verify hook/tool install; check absolute paths in hook config; ensure sidecar at `<file>.murmur.json` |
+| Murmurs don't appear after agent writes sidecar | File watcher not triggering | Run `:MurmurToggle` twice, or `:edit` to force reload; ensure `murmur.sh` / tools write valid JSON |
+| `murmur.sh scan` returns nothing | Wrong directory or no sidecars | Run from project root; `murmur.sh scan .` scans recursively (skips `node_modules`, `.git`, etc.) |
+| Orphaned murmurs (⚠) after git pull / external edit | Anchor text moved >20 lines | Run `:MurmurListAll`, manually relocate with `:MurmurEdit`, or delete and re-add |
+| Diff view shows dimmed `⊞` badge, can't add murmurs | Viewing staged/HEAD side (read-only) | Switch to worktree buffer (the real file) to pin/modify |
+| OpenCode agent never calls `read_murmur` | Missing instruction in `AGENTS.md` | Add the rule from the OpenCode install section to your `AGENTS.md` |
+| OMP/Pi extension not loading | Symlink path wrong or OMP not restarted | Verify `ls -la ~/.omp/agent/extensions/murmur/` points to your clone; restart OMP |
 
 ## Development
-
-Tests use [plenary.nvim](https://github.com/nvim-lua/plenary.nvim):
-
-```bash
-nvim --headless --noplugin -u NORC \
-  -c "set rtp+=~/development/murmur" \
-  -c "set rtp+=$(pwd)/.deps/plenary.nvim" \
-  -c "lua require('plenary.busted')" \
-  -c "qa"
-```
 
 ## License
 
