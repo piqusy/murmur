@@ -46,13 +46,12 @@ export interface MurmurFileResult {
 export interface MurmurBatchResult {
   root: string
   files: MurmurFileResult[]
-  annotatedFileCount: number
-  murmurCount: number
-}
-
-export interface ScanMurmurOptions {
-  maxDepth?: number
   ignoredDirectories?: ReadonlySet<string>
+  // Default depth is unbounded: rely on the ignored-directory list (.git,
+  // node_modules, dist, .next, vendor, etc.) plus the caller's own .gitignore
+  // choices. Call sites that want the legacy v0.3.0 cap can pass
+  // `{ maxDepth: 6 }` explicitly.
+  maxDepth?: number
 }
 
 export function isMurmurArray(value: unknown): value is Murmur[] {

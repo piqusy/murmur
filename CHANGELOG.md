@@ -1,6 +1,22 @@
 # Changelog
 ## [Unreleased]
 
+## [0.3.1] — 2026-07-29
+
+### Changed
+- OMP `read_murmur` wrapper now reports per-file status (`annotated` | `clear` | `invalid_sidecar` | `missing_source`) instead of collapsing every non-annotated case to "Clear to edit." — agents that hit a malformed sidecar or a deleted source file now see the actual condition.
+
+### Fixed
+- OMP `read_murmur` wrapper no longer hides `invalid_sidecar` / `missing_source` results behind the "Clear to edit." string.
+- Documented `scanMurmurFiles` `maxDepth` default (`+Infinity`) and how to opt back into the legacy depth-6 cap.
+
+### Added
+- GitHub Actions workflow `.github/workflows/integration-ci.yml` — on PRs that touch `integrations/**` and on every `v*` tag push: runs `bun test spec/murmur_integration.spec.ts`, `bun scripts/murmur-core-smoke.ts`, and `node --check` on every integration module. Closes the CI gap that left OMP/OpenCode edits unverified.
+- GitHub Actions workflow `.github/workflows/mirror-lua.yml` — on every `v*` tag push: clones `piqusy/murmur.nvim`, layers `lua/`, `spec/`, and `CHANGELOG.md` from the upstream tag, preserves the mirror's curated files (`README.md`, `LICENSE`, `.gitignore`, `.notes/`, `.github/`), force-pushes the resulting commit, and re-tags at the same version. Requires the `MIRROR_TOKEN` repository secret (fine-grained PAT scoped to `piqusy/murmur.nvim` with `Contents: write`); see `.github/MIRROR_TOKEN_SETUP.md` for the one-time provisioning steps.
+- Behavioral coverage in `spec/murmur_integration.spec.ts` for `readMurmurFile` per-file status (annotated, clear, invalid_sidecar, missing_source, malformed-shape) — these tests reproduce the bug the `m.anchor` fix patched and guard against the same class of regression.
+- Structural test that asserts the OMP `read_murmur` wrapper body no longer returns the unconditional "Clear to edit." string for non-`clear` statuses.
+
+
 ### Added
 - `murmur.sh scan [dir]` (alias: `list`) — brings the project-wide read that
   OMP/OpenCode's `scan_murmurs` already had to Claude Code, Codex, and

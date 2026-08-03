@@ -147,20 +147,44 @@ export default function murmurExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params) {
       const [result] = readMurmurFiles([params.filepath]).files;
-      if (!result || result.status === "annotated") {
-        const text = result && result.status === "annotated"
-          ? `Murmurs for ${result.path}:\n${formatMurmurBatch({ root: result.absolutePath, files: [result], annotatedFileCount: 1, murmurCount: result.murmurs.length })}`
-          : `No murmurs for ${params.filepath}. Clear to edit.`;
-        return {
-          content: [{ type: "text" as const, text }],
-          details: result
-            ? { ok: true, status: result.status, murmurs: result.murmurs }
-            : { ok: true, status: "clear", murmurs: [] },
+      const fileResult =
+        result ?? {
+          path: params.filepath,
+          absolutePath: "",
+          status: "clear" as const,
+          murmurs: [],
         };
+      const lines: string[] = [`Murmurs for ${fileResult.path} [${fileResult.status}]`];
+      let detailsMurmurs: typeof fileResult.murmurs = [];
+      switch (fileResult.status) {
+        case "annotated":
+          lines.push(
+            formatMurmurBatch({
+              root: fileResult.absolutePath,
+              files: [fileResult],
+              annotatedFileCount: 1,
+              murmurCount: fileResult.murmurs.length,
+            }),
+          );
+          detailsMurmurs = fileResult.murmurs;
+          break;
+        case "clear":
+          lines.push("Clear to edit.");
+          break;
+        case "invalid_sidecar":
+          lines.push(
+            `Sidecar is invalid JSON${fileResult.error ? `: ${fileResult.error}` : ""}.`,
+          );
+          break;
+        case "missing_source":
+          lines.push(
+            `Source file does not exist${fileResult.error ? `: ${fileResult.error}` : ""}.`,
+          );
+          break;
       }
       return {
-        content: [{ type: "text" as const, text: `No murmurs for ${params.filepath}. Clear to edit.` }],
-        details: { ok: true, status: result.status, murmurs: [] },
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+        details: { ok: true, status: fileResult.status, murmurs: detailsMurmurs },
       };
     },
   });
