@@ -1,4 +1,22 @@
 # Changelog
+## [Unreleased]
+
+### Added
+- `murmur.sh scan [dir]` (alias: `list`) — brings the project-wide read that
+  OMP/OpenCode's `scan_murmurs` already had to Claude Code, Codex, and
+  Antigravity, which previously had no proactive way to see a project's
+  murmurs; the PreToolUse hook only surfaces them reactively, per file, on
+  edit. Output matches `formatMurmurBatch` byte-for-byte (verified against
+  the shared TS core across annotated/clear/invalid_sidecar/missing_source
+  fixtures).
+
+### Fixed
+- `formatMurmur` in `integrations/shared/murmur-core.ts` referenced an
+  undefined `m.anchor` instead of `murmur.anchor` — every call from
+  `formatMurmurBatch` (i.e. every OMP/OpenCode `scan_murmurs`/`read_murmurs`
+  call that hit a non-empty sidecar) would throw. Existing tests didn't
+  catch it because they only assert exports exist, not runtime behavior.
+
 ## [0.3.0] — 2026-07-28
 
 ### Added

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# murmur CLI — universal write path for harnesses that can't register native
-# tools (Claude Code, Codex, Antigravity). Agents invoke this via their shell
-# tool to add or delete murmurs by manipulating sidecar JSON directly.
+# murmur CLI — universal read/write path for harnesses that can't register
+# native tools (Claude Code, Codex, Antigravity). Agents invoke this via their
+# shell tool to add, delete, or scan murmurs by manipulating sidecar JSON
+# directly.
 #
 # Usage:
 #   murmur.sh add <file> <line> <author> <message>
 #   murmur.sh delete-file <file>
 #   murmur.sh delete-all [dir]
+#   murmur.sh scan [dir]   (alias: list) — proactive project-wide scan;
+#                          the PreToolUse hook only surfaces murmurs reactively,
+#                          per file, on Edit/Write/MultiEdit.
 #
 # Requires: jq, date, sed. UUID via uuidgen, /proc/sys/kernel/random/uuid,
 # or python3 fallback.
@@ -96,6 +100,112 @@ cmd_delete_all() {
   echo "Deleted ${count} sidecar file(s) under ${dir}"
 }
 
+# Finds every *.murmur.json sidecar under $1 (default: cwd) and prints a
+# human-readable summary — annotation count, per-file murmur listing, and
+# which checked files are clear. Mirrors integrations/shared/murmur-core.ts's
+# scanMurmurFiles + formatMurmurBatch so all integrations agree on shape.
+cmd_scan() {
+  local dir="${1:-.}"
+  dir="${dir%/}"
+  [ -z "$dir" ] && dir="."
+
+  local sidecars=()
+  while IFS= read -r -d '' f; do
+    sidecars+=("$f")
+  done < <(find "$dir" -name "*${SIDECAR_SUFFIX}" \
+    -not -path '*/node_modules/*' \
+    -not -path '*/.git/*' \
+    -not -path '*/.venv/*' \
+    -not -path '*/vendor/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/build/*' \
+    -not -path '*/.next/*' \
+    -not -path '*/.deps/*' \
+    -print0 2>/dev/null | sort -z)
+
+  if [ "${#sidecars[@]}" -eq 0 ]; then
+    echo "No files checked."
+    return 0
+  fi
+
+  local total=0
+  local blocks=()
+  local clear_paths=()
+
+  for sidecar in "${sidecars[@]}"; do
+    local source="${sidecar%"${SIDECAR_SUFFIX}"}"
+    local rel="$source"
+    if [ "$dir" = "." ]; then
+      rel="${rel#./}"
+    else
+      rel="${rel#"$dir"/}"
+    fi
+
+    if ! jq -e . "$sidecar" >/dev/null 2>&1; then
+      blocks+=("${rel} [invalid_sidecar]
+  invalid JSON")
+      continue
+    fi
+
+    if ! jq -e 'type == "array"' "$sidecar" >/dev/null 2>&1; then
+      blocks+=("${rel} [invalid_sidecar]
+  sidecar must contain an array of murmur objects")
+      continue
+    fi
+
+    local count
+    count=$(jq 'length' "$sidecar")
+
+    local formatted=""
+    if [ "$count" -gt 0 ]; then
+      formatted=$(jq -r '
+        map(
+          "  L\(.line // "?") [\(.author // "User")] \(.message // "")"
+          + (if .orphaned == true then " [orphaned]" else "" end)
+          + " (anchored: \"\(.anchor // "")\")"
+        ) | join("\n")
+      ' "$sidecar")
+    fi
+
+    if [ ! -f "$source" ]; then
+      # Sidecar outlived its source — still counts, still worth surfacing.
+      total=$((total + count))
+      if [ "$count" -eq 0 ]; then
+        blocks+=("${rel} [missing_source]
+  source file does not exist")
+      else
+        blocks+=("${rel} [missing_source]
+  source file does not exist
+${formatted}")
+      fi
+      continue
+    fi
+
+    if [ "$count" -eq 0 ]; then
+      clear_paths+=("$rel")
+      continue
+    fi
+
+    total=$((total + count))
+    blocks+=("${rel} [annotated]
+${formatted}")
+  done
+
+  echo "Murmurs: ${total} annotation(s) across ${#sidecars[@]} checked file(s)."
+  for block in "${blocks[@]}"; do
+    echo
+    echo "$block"
+  done
+
+  if [ "${#clear_paths[@]}" -gt 0 ]; then
+    local joined
+    joined=$(printf '%s, ' "${clear_paths[@]}")
+    joined="${joined%, }"
+    echo
+    echo "Clear: ${joined}"
+  fi
+}
+
 case "${1:-}" in
   add)
     [ "$#" -lt 5 ] && { echo "Usage: murmur.sh add <file> <line> <author> <message>" >&2; exit 1; }
@@ -108,11 +218,15 @@ case "${1:-}" in
   delete-all)
     cmd_delete_all "${2:-.}"
     ;;
+  scan|list)
+    cmd_scan "${2:-.}"
+    ;;
   *)
-    echo "Usage: murmur.sh {add|delete-file|delete-all} ..." >&2
+    echo "Usage: murmur.sh {add|delete-file|delete-all|scan} ..." >&2
     echo "  add <file> <line> <author> <message>  — append a murmur to the file's sidecar" >&2
     echo "  delete-file <file>                     — remove the file's sidecar" >&2
     echo "  delete-all [dir]                       — remove all sidecars under dir (default: .)" >&2
+    echo "  scan [dir]                             — list every murmur under dir (default: .), alias: list" >&2
     exit 1
     ;;
 esac

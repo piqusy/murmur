@@ -204,7 +204,7 @@ export function scanMurmurFiles(
 
 function formatMurmur(murmur: Murmur): string {
   const orphaned = murmur.orphaned === true ? " [orphaned]" : ""
-  return `  L${murmur.line ?? "?"} [${murmur.author ?? "User"}] ${murmur.message ?? ""}${orphaned} (anchored: "${(m.anchor ?? "").trim()}")`
+  return `  L${murmur.line ?? "?"} [${murmur.author ?? "User"}] ${murmur.message ?? ""}${orphaned} (anchored: "${(murmur.anchor ?? "").trim()}")`
 }
 
 export function formatMurmurBatch(result: MurmurBatchResult): string {

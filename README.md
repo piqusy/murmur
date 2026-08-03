@@ -220,6 +220,8 @@ shell tool:
 murmur.sh add src/auth.ts 42 Claude "Refactored — see commit abc123"
 murmur.sh delete-file src/auth.ts
 murmur.sh delete-all .
+murmur.sh scan .          # project-wide read, alias: list — the PreToolUse
+                          # hook is reactive (per file, on edit); this isn't
 ```
 
 Install `murmur.sh` alongside the PreToolUse hook (see per-harness instructions
