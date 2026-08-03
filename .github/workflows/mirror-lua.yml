@@ -1,0 +1,94 @@
+name: Mirror Lua subtree to murmur.nvim
+
+# Why: a `v*` tag on piqusy/murmur is the only signal we trust to publish Lua
+# to piqusy/murmur.nvim. This workflow checks out that tag, stages only the
+# Neovim-facing subtree (lua/, spec/, CHANGELOG.md), preserves the mirror's
+# own curated files, force-pushes a new commit to murmur.nvim main, and
+# re-tags at the same version. Lazy.nvim / packer / vim-plug will see v0.3.1
+# the moment the upstream tag lands.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror lua/ + spec/ + CHANGELOG.md → murmur.nvim
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout upstream tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          ref: ${{ github.ref_name }}
+
+      - name: Setup mirror working tree
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf ../murmur.nvim-mirror
+          git clone --depth 50 "https://x-access-token:${MIRROR_TOKEN}@github.com/piqusy/murmur.nvim.git" ../murmur.nvim-mirror
+          cd ../murmur.nvim-mirror
+          git config user.name "murmur-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout main || git checkout --orphan main
+          git rm -rfq . 2>/dev/null || true
+
+      - name: Layer upstream subtree onto mirror
+        working-directory: ../murmur.nvim-mirror
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+
+          # Restore the mirror's curated files from the cloned HEAD.
+          for path in README.md LICENSE .gitignore .notes .github; do
+            if git show "HEAD:$path" >/dev/null 2>&1; then
+              git checkout HEAD -- "$path"
+            fi
+          done
+
+          # Copy the upstream Neovim-facing subtree.
+          cp -R "$GITHUB_WORKSPACE/lua" "./lua"
+          cp -R "$GITHUB_WORKSPACE/spec" "./spec"
+          cp "$GITHUB_WORKSPACE/CHANGELOG.md" "./CHANGELOG.md"
+
+          git add lua spec CHANGELOG.md README.md LICENSE .gitignore .notes .github 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No upstream changes to mirror for $VERSION"
+            exit 0
+          fi
+
+          git -c user.name="murmur-bot" \
+              -c user.email="bot@users.noreply.github.com" \
+              commit -m "sync from piqusy/murmur $VERSION"
+
+      - name: Force-push commit and tag
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+        working-directory: ../murmur.nvim-mirror
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          # The first push of a brand-new mirror needs to create main.
+          git push --force origin "HEAD:main"
+          git tag --force --annotate --message "murmur.nvim $VERSION — auto-mirror of piqusy/murmur $VERSION" "$VERSION" HEAD || true
+          git push --force origin "refs/tags/$VERSION"
+
+      - name: Note mirror token missing
+        if: failure()
+        run: |
+          echo "Mirror workflow failed."
+          echo "If the error mentions 'Bad credentials', ensure MIRROR_TOKEN is set:"
+          echo "  GitHub → piqusy/murmur → Settings → Secrets and variables → Actions"
+          echo "  → New repository secret → Name: MIRROR_TOKEN"
+          echo "  → Secret: a fine-grained PAT scoped to piqusy/murmur.nvim with Contents: write."
+          echo "  → The PAT's owner account must have push rights on piqusy/murmur.nvim."

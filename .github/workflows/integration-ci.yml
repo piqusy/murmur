@@ -1,0 +1,64 @@
+name: Integration CI
+
+# Why: the OMP and OpenCode integrations live in integrations/**/*.ts and
+# have no other CI guard. This workflow runs:
+#   - node --check on every integration TypeScript module (parser-only)
+#   - bun test spec/murmur_integration.spec.ts (regression coverage)
+#   - bun scripts/murmur-core-smoke.ts (runtime behavior, prints statuses)
+# It runs on PRs that touch the integration surface and on every v* tag
+# push. Plenary harness runs are intentionally NOT included: they need a
+# graphical nvim and belong to a separate workflow on the mirror repo.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'integrations/**'
+      - 'scripts/murmur-core-smoke.ts'
+      - 'spec/murmur_integration.spec.ts'
+      - '.github/workflows/integration-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: bun + node integration checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.34
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: node --check every integration module
+        run: |
+          set -euo pipefail
+          status=0
+          for f in $(find integrations -type f \( -name '*.ts' -o -name '*.js' \) | sort); do
+            if ! node --check "$f"; then
+              echo "::error file=$f::node --check failed"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "One or more integration modules failed node --check."
+            exit "$status"
+          fi
+
+      - name: bun test spec/murmur_integration.spec.ts
+        run: bun test spec/murmur_integration.spec.ts
+
+      - name: bun run scripts/murmur-core-smoke.ts
+        run: bun scripts/murmur-core-smoke.ts
