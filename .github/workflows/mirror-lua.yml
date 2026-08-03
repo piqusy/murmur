@@ -12,6 +12,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to mirror (e.g. v0.3.1). Required when dispatching manually.'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,11 +28,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Refusing to mirror: '$VERSION' is not a vMAJOR.MINOR.PATCH tag."
+            exit 1
+          fi
+          echo "version=$VERSION" >>"$GITHUB_OUTPUT"
+          echo "Resolved mirror source: piqusy/murmur $VERSION"
+
       - name: Checkout upstream tag
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          ref: ${{ github.ref_name }}
+          ref: ${{ steps.version.outputs.version }}
 
       - name: Setup mirror working tree
         env:
@@ -43,10 +64,11 @@ jobs:
           git rm -rfq . 2>/dev/null || true
 
       - name: Layer upstream subtree onto mirror
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         working-directory: ../murmur.nvim-mirror
         run: |
           set -euo pipefail
-          VERSION="${{ github.ref_name }}"
 
           # Restore the mirror's curated files from the cloned HEAD.
           for path in README.md LICENSE .gitignore .notes .github; do
@@ -74,10 +96,10 @@ jobs:
       - name: Force-push commit and tag
         env:
           MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         working-directory: ../murmur.nvim-mirror
         run: |
           set -euo pipefail
-          VERSION="${{ github.ref_name }}"
           # The first push of a brand-new mirror needs to create main.
           git push --force origin "HEAD:main"
           git tag --force --annotate --message "murmur.nvim $VERSION — auto-mirror of piqusy/murmur $VERSION" "$VERSION" HEAD || true
