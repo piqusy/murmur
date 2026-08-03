@@ -82,7 +82,7 @@ jobs:
           cp -R "$GITHUB_WORKSPACE/spec" "./spec"
           cp "$GITHUB_WORKSPACE/CHANGELOG.md" "./CHANGELOG.md"
 
-          git add lua spec CHANGELOG.md README.md LICENSE .gitignore .notes .github 2>/dev/null || true
+          git add -A
 
           if git diff --cached --quiet; then
             echo "No upstream changes to mirror for $VERSION"
