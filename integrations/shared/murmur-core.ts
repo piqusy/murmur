@@ -21,7 +21,9 @@ export const DEFAULT_IGNORED_DIRECTORIES = new Set([
 export interface Murmur {
   id?: string
   line?: number
+  end_line?: number
   anchor?: string
+  end_anchor?: string
   author?: string
   message?: string
   created_at?: string
@@ -62,7 +64,9 @@ export function isMurmurArray(value: unknown): value is Murmur[] {
         item !== null &&
         typeof item === "object" &&
         (item.line === undefined || typeof item.line === "number") &&
+        (item.end_line === undefined || typeof item.end_line === "number") &&
         (item.anchor === undefined || typeof item.anchor === "string") &&
+        (item.end_anchor === undefined || typeof item.end_anchor === "string") &&
         (item.author === undefined || typeof item.author === "string") &&
         (item.message === undefined || typeof item.message === "string"),
     )
@@ -202,8 +206,12 @@ export function scanMurmurFiles(
 }
 
 function formatMurmur(murmur: Murmur): string {
+  const line = murmur.line ?? "?"
+  const location = murmur.end_line && murmur.end_line > (murmur.line ?? 0)
+    ? `L:${line}-${murmur.end_line}`
+    : `L${line}`
   const orphaned = murmur.orphaned === true ? " [orphaned]" : ""
-  return `  L${murmur.line ?? "?"} [${murmur.author ?? "User"}] ${murmur.message ?? ""}${orphaned} (anchored: "${(murmur.anchor ?? "").trim()}")`
+  return `  ${location} [${murmur.author ?? "User"}] ${murmur.message ?? ""}${orphaned} (anchored: "${(murmur.anchor ?? "").trim()}")`
 }
 
 export function formatMurmurBatch(result: MurmurBatchResult): string {

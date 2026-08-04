@@ -257,6 +257,9 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       line: Type.Integer({
         description: "1-indexed line number to annotate",
       }),
+      end_line: Type.Optional(Type.Integer({
+        description: "Optional inclusive 1-indexed final line for a multiline murmur",
+      })),
       author: Type.String({
         description: "Author name (e.g. \"Claude\", \"OMP\"). Anything other than \"User\" gets agent styling.",
       }),
@@ -271,13 +274,18 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       const sidecar = abs + SIDECAR_SUFFIX;
 
       let anchor = "";
+      let endAnchor = "";
+      let sourceLines: string[] = [];
       try {
-        const content = fs.readFileSync(abs, "utf-8");
-        const lines = content.split("\n");
-        anchor = (lines[params.line - 1] || "").trim();
+        sourceLines = fs.readFileSync(abs, "utf-8").split("\n");
+        anchor = (sourceLines[params.line - 1] || "").trim();
       } catch {
-        // file might not be readable; anchor stays empty
+        // file might not be readable; anchors stay empty
       }
+      const endLine = params.end_line && params.end_line > params.line && params.end_line <= sourceLines.length
+        ? params.end_line
+        : undefined;
+      if (endLine) endAnchor = (sourceLines[endLine - 1] || "").trim();
 
       const id = randomUUID();
       const ts = new Date().toISOString();
@@ -293,6 +301,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       murmurs.push({
         id,
         line: params.line,
+        ...(endLine ? { end_line: endLine, end_anchor: endAnchor } : {}),
         anchor,
         author: params.author,
         message: params.message,
@@ -307,7 +316,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       deliveredSidecarFingerprints.set(abs, getSidecarFingerprint(abs));
 
       return {
-        content: [{ type: "text" as const, text: `Added murmur at ${params.filepath}:${params.line} [${params.author}] ${params.message}` }],
+        content: [{ type: "text" as const, text: `Added murmur at ${params.filepath}:${endLine ? `L:${params.line}-${endLine}` : params.line} [${params.author}] ${params.message}` }],
         details: { ok: true },
       };
     },

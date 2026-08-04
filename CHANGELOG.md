@@ -1,4 +1,13 @@
 # Changelog
+## [0.4.0] — 2026-08-04
+
+### Added
+- Multiline murmurs: `:MurmurAdd` can anchor a visual selection as an inclusive `L:START-END` range, with start and end anchors that follow buffer edits.
+- Optional `end_line` support for OMP, OpenCode, and `murmur.sh add` integrations.
+
+### Changed
+- Murmur range labels are rendered consistently in Neovim and harness output.
+
 ## [0.3.2] — 2026-08-03
 
 ### Fixed

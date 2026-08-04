@@ -12,7 +12,7 @@ local ns_id = vim.api.nvim_create_namespace("Murmur")
 
 -- bufnr → array of murmur tables (in-memory truth while buffer is open)
 local mem = {}
--- bufnr → { [murmur_id] = extmark_id }
+-- bufnr → { [murmur_id] = { start = extmark_id, finish = extmark_id? } }
 local extmarks = {}
 -- bufnr → uv_fs_event handle
 local watchers = {}
@@ -168,6 +168,15 @@ local function sort_murmurs(murmurs)
   end)
 end
 
+local function murmur_location(murmur)
+  local line = tonumber(murmur.line) or 0
+  local end_line = tonumber(murmur.end_line)
+  if end_line and end_line > line then
+    return string.format("L:%d-%d", line, end_line)
+  end
+  return "L" .. tostring(line)
+end
+
 -- load: read sidecar into mem, validate anchors (relocate drift / mark orphan)
 
 local function load_murmurs(bufnr)
@@ -225,6 +234,47 @@ local function load_murmurs(bufnr)
         m.orphaned = true
       end
     end
+
+    local end_line = tonumber(m.end_line)
+    if end_line and end_line > (tonumber(m.line) or 0) then
+      local end_anchor = m.end_anchor or ""
+      local current_end = ""
+      if end_line <= linecount then
+        current_end = vim.api.nvim_buf_get_lines(bufnr, end_line - 1, end_line, false)[1] or ""
+      end
+
+      if end_anchor == "" and current_end ~= "" then
+        m.end_anchor = trim(current_end)
+        end_anchor = m.end_anchor
+        changed = true
+      end
+      if end_anchor ~= "" and norm(current_end) == norm(end_anchor) then
+        -- no drift: end anchor matches the stored line
+      else
+        local lo = math.max((tonumber(m.line) or 1) - 1, end_line - 21)
+        local hi = math.min(linecount, end_line + 20)
+        local found = nil
+        if hi > lo then
+          local region = vim.api.nvim_buf_get_lines(bufnr, lo, hi, false)
+          for i, text in ipairs(region) do
+            if end_anchor ~= "" and norm(text) == norm(end_anchor) then
+              found = lo + i - 1
+              break
+            end
+          end
+        end
+        if found then
+          m.end_line = found + 1
+          m.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, found, found + 1, false)[1] or "")
+          changed = true
+        else
+          m.orphaned = true
+        end
+      end
+    else
+      m.end_line = nil
+      m.end_anchor = nil
+    end
   end
 
   sort_murmurs(murmurs)
@@ -242,19 +292,27 @@ local function sync_back(bufnr)
   local murmurs = mem[bufnr]
   if not murmurs or #murmurs == 0 then return end
   local marks = extmarks[bufnr] or {}
-  local linecount = vim.api.nvim_buf_line_count(bufnr)
   local changed = false
 
   for _, m in ipairs(murmurs) do
-    local mark_id = marks[m.id]
-    if mark_id then
-      local ok, pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_id, {})
-      if ok and pos and pos[1] ~= nil then
-        local new_line = pos[1] + 1
-        if new_line ~= m.line then
-          -- sync the anchor text (use the sign-only extmark position — still tracks the line)
-          m.line = new_line
-          m.anchor = trim(vim.api.nvim_buf_get_lines(bufnr, pos[1], pos[2], false)[1] or "")
+    local mark_ids = marks[m.id] or {}
+    local ok, start_pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_ids.start, {})
+    if ok and start_pos and start_pos[1] ~= nil then
+      local new_line = start_pos[1] + 1
+      if new_line ~= m.line then
+        m.line = new_line
+        m.anchor = trim(vim.api.nvim_buf_get_lines(bufnr, start_pos[1], start_pos[1] + 1, false)[1] or "")
+        changed = true
+      end
+    end
+
+    if m.end_line and mark_ids.finish then
+      local ok_end, end_pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_ids.finish, {})
+      if ok_end and end_pos and end_pos[1] ~= nil then
+        local new_end_line = end_pos[1] + 1
+        if new_end_line ~= m.end_line then
+          m.end_line = new_end_line
+          m.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, end_pos[1], end_pos[1] + 1, false)[1] or "")
           changed = true
         end
       end
@@ -366,7 +424,9 @@ function M.render(bufnr)
           end
           content_w = math.max(28, content_w) + 2
           -- header: embed line number on the right when there is room
-          local linetext = ":" .. tostring(line)
+          local linetext = tonumber(m.end_line) and tonumber(m.end_line) > line
+            and murmur_location(m)
+            or ":" .. tostring(line)
           local linetxt_w = vim.fn.strdisplaywidth(linetext)
           local gap_w = content_w - vim.fn.strdisplaywidth(header_label) + 2
           local right_side
@@ -400,9 +460,18 @@ function M.render(bufnr)
         end
       end
 
-      local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, row, 0, opts)
-      if ok then marks[m.id] = id end
-    end
+      local ok, start_id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, row, 0, opts)
+      if ok then
+        local mark_ids = { start = start_id }
+        local end_line = tonumber(m.end_line)
+        if end_line and end_line > line then
+          local end_row = math.max(0, math.min(end_line - 1, linecount - 1))
+          local end_ok, finish_id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, end_row, 0, { right_gravity = true })
+          if end_ok then mark_ids.finish = finish_id end
+        end
+        marks[m.id] = mark_ids
+      end
+  end
   end
   extmarks[bufnr] = marks
 end
@@ -424,7 +493,7 @@ end
 -- public actions ------------------------------------------------------------
 
 -- M.add: programmatic (non-interactive) murmur creation — the agent API.
--- opts: { bufnr?, line?, author?, message }
+-- opts: { bufnr?, line?, end_line?, author?, message }
 function M.add(opts)
   opts = opts or {}
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -436,9 +505,10 @@ function M.add(opts)
   local row = opts.line or vim.api.nvim_win_get_cursor(0)[1]
   local linecount = vim.api.nvim_buf_line_count(bufnr)
   row = math.max(1, math.min(row, linecount))
+  local end_row = opts.end_line and math.max(row, math.min(opts.end_line, linecount)) or row
   local anchor = trim(vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or "")
   local murmurs = mem[bufnr] or {}
-  table.insert(murmurs, {
+  local murmur = {
     id = gen_id(),
     line = row,
     anchor = anchor,
@@ -446,7 +516,12 @@ function M.add(opts)
     message = opts.message or "",
     created_at = iso_now(),
     orphaned = false,
-  })
+  }
+  if end_row > row then
+    murmur.end_line = end_row
+    murmur.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, end_row - 1, end_row, false)[1] or "")
+  end
+  table.insert(murmurs, murmur)
   sort_murmurs(murmurs)
   mem[bufnr] = murmurs
   write_sidecar(bufnr, path, murmurs)
@@ -454,7 +529,7 @@ function M.add(opts)
   return true
 end
 
-function M.add_murmur()
+function M.add_murmur(line1, line2)
   local bufnr = vim.api.nvim_get_current_buf()
   if not sidecar_path(bufnr) then
     vim.notify("murmur: buffer has no file path", vim.log.levels.WARN)
@@ -467,9 +542,22 @@ function M.add_murmur()
   vim.ui.input({ prompt = "Instruction for agent: " }, function(input)
     if not input or vim.trim(input) == "" then return end
     vim.schedule(function()
-      M.add({ bufnr = bufnr, author = "User", message = input })
+      M.add({
+        bufnr = bufnr,
+        line = line1,
+        end_line = line2,
+        author = "User",
+        message = input,
+      })
     end)
   end)
+end
+
+function M.add_visual_murmur()
+  local line1 = vim.fn.line("v")
+  local line2 = vim.fn.line(".")
+  if line1 > line2 then line1, line2 = line2, line1 end
+  M.add_murmur(line1, line2)
 end
 
 function M.delete_murmur()
@@ -487,7 +575,7 @@ function M.delete_murmur()
   for i, m in ipairs(murmurs) do
     table.insert(items, {
       idx = i,
-      text = string.format("L%d [%s] %s", tonumber(m.line) or 0, m.author or "User", m.message or ""),
+      text = string.format("%s [%s] %s", murmur_location(m), m.author or "User", m.message or ""),
       murmur = m,
     })
   end
@@ -499,7 +587,7 @@ function M.delete_murmur()
       mem[bufnr] = murmurs
       write_sidecar(bufnr, sidecar_path(bufnr), murmurs)
       M.render(bufnr)
-      vim.notify("Deleted murmur at L" .. tostring(m.line), vim.log.levels.INFO)
+      vim.notify("Deleted murmur at " .. murmur_location(m), vim.log.levels.INFO)
     end)
   end)
 end
@@ -519,7 +607,7 @@ function M.edit_murmur()
   for i, m in ipairs(murmurs) do
     table.insert(items, {
       idx = i,
-      text = string.format("L%d [%s] %s", tonumber(m.line) or 0, m.author or "User", m.message or ""),
+      text = string.format("%s [%s] %s", murmur_location(m), m.author or "User", m.message or ""),
       murmur = m,
     })
   end
@@ -535,7 +623,7 @@ function M.edit_murmur()
           m.updated_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
           write_sidecar(bufnr, sidecar_path(bufnr), murmurs)
           M.render(bufnr)
-          vim.notify("Updated murmur at L" .. tostring(m.line), vim.log.levels.INFO)
+          vim.notify("Updated murmur at " .. murmur_location(m), vim.log.levels.INFO)
         end)
       end)
     end)
@@ -553,7 +641,7 @@ function M.list_murmurs()
   for i, m in ipairs(murmurs) do
     table.insert(items, {
       idx = i,
-      text = string.format("L%d  %s", tonumber(m.line) or 0, m.message or ""),
+      text = string.format("%s  %s", murmur_location(m), m.message or ""),
       murmur = m,
     })
   end
@@ -590,7 +678,7 @@ function M.list_all_murmurs()
       table.insert(results, {
         file = base,
         line = tonumber(m.line) or 1,
-        text = string.format("%s:%d  [%s] %s", rel, tonumber(m.line) or 0, m.author or "User", m.message or ""),
+        text = string.format("%s:%s  [%s] %s", rel, murmur_location(m), m.author or "User", m.message or ""),
       })
     end
   end
@@ -782,7 +870,9 @@ function M.setup(opts)
     callback = setup_highlights,
   })
 
-  vim.api.nvim_create_user_command("MurmurAdd", function() M.add_murmur() end, {})
+  vim.api.nvim_create_user_command("MurmurAdd", function(command)
+    M.add_murmur(command.line1, command.line2)
+  end, { range = true })
   vim.api.nvim_create_user_command("MurmurDelete", function() M.delete_murmur() end, {})
   vim.api.nvim_create_user_command("MurmurDeleteFile", function()
     local n = M.delete_file_murmurs()

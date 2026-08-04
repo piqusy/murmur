@@ -1,6 +1,6 @@
 # murmur.nvim
 
-Inline line annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
+Inline line and range annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines or visual selections. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
 
 ## Quick Start
 
@@ -41,6 +41,7 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
 - **Always-on sign indicator** - `◉` in the sign column whenever a murmur exists
 - **Content wrapping** - long messages wrap to fit the window (box mode)
 - **Line-drift tracking** - extmarks follow text edits; a content anchor re-locates murmurs after external edits
+- **Visual-range annotations** - run `:MurmurAdd` on a visual line selection to anchor a murmur from `L:10-14`
 - **Sidecar storage** - `<file>.murmur.json` alongside each file (gitignored globally)
 - **Pluggable picker** - snacks / telescope / fzf-lua / builtin `vim.ui.select`
 - **Zero dependencies** - works on bare Neovim
@@ -79,7 +80,7 @@ Inline line annotations for Neovim - leave instructions for your AI agent (or fu
 
 | Command | Description |
 |---|---|
-| `:MurmurAdd` | Add a murmur on the current line |
+| `:MurmurAdd` | Add a murmur on the current line, or on the selected visual line range |
 | `:MurmurDelete` | Select and delete a single murmur |
 | `:MurmurDeleteFile` | Delete all murmurs in the current file |
 | `:MurmurDeleteAll` | Delete all murmurs across every open buffer (with confirm) |
@@ -185,9 +186,10 @@ in Neovim detects the change and re-renders automatically — no Neovim RPC
 needed.
 
 Write a new murmur object with:
-- `id`: a unique UUID string
-- `line`: the 1-indexed target line
-- `anchor`: the exact trimmed text of that line (used for drift recovery)
+- `line`: the 1-indexed starting line
+- `end_line`: optional inclusive final line for a multiline murmur
+- `anchor`: the exact trimmed text of the starting line (used for drift recovery)
+- `end_anchor`: the exact trimmed text of the final line for a multiline murmur
 - `author`: your agent name (e.g. `"Claude"`, `"OMP"`)
 - `message`: the annotation
 - `created_at`: ISO 8601 UTC
@@ -210,8 +212,8 @@ require("murmur").add({
   author = "Claude",   -- anything other than "User" gets agent styling
   message = "Refactored — see commit abc123",
   line = 42,           -- optional, defaults to cursor line
+  end_line = 48,       -- optional inclusive final line for a multiline murmur
   bufnr = 0,           -- optional, defaults to current buffer
-})
 ```
 
 Delete all murmurs in a single file (returns count removed):
@@ -238,7 +240,7 @@ read-before-write — so agents don't manipulate sidecar JSON directly.
 
 | Tool | Parameters | Effect |
 |---|---|---|
-| `add_murmur` | `filepath`, `line`, `author`, `message` | Append a murmur to the file's sidecar |
+| `add_murmur` | `filepath`, `line`, `end_line?`, `author`, `message` | Append a murmur to the file's sidecar; `end_line` creates an inclusive multiline range |
 | `delete_file_murmurs` | `filepath` | Remove the file's sidecar |
 | `delete_all_murmurs` | `dir?` (defaults to cwd) | Remove all sidecars in the project |
 
@@ -249,7 +251,7 @@ read-before-write — so agents don't manipulate sidecar JSON directly.
 shell tool:
 
 ```bash
-murmur.sh add src/auth.ts 42 Claude "Refactored — see commit abc123"
+murmur.sh add src/auth.ts 42 Claude "Refactored — see commit abc123" 48
 murmur.sh delete-file src/auth.ts
 murmur.sh delete-all .
 murmur.sh scan .          # project-wide read, alias: list — the PreToolUse

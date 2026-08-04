@@ -5,7 +5,7 @@
 # directly.
 #
 # Usage:
-#   murmur.sh add <file> <line> <author> <message>
+#   murmur.sh add <file> <start-line> <author> <message> [end-line]
 #   murmur.sh delete-file <file>
 #   murmur.sh delete-all [dir]
 #   murmur.sh scan [dir]   (alias: list) — proactive project-wide scan;
@@ -31,7 +31,7 @@ gen_uuid() {
 }
 
 cmd_add() {
-  local file="$1" line="$2" author="$3" message="$4"
+  local file="$1" line="$2" author="$3" message="$4" end_line="${5:-}"
   local sidecar="${file}${SIDECAR_SUFFIX}"
 
   if [ ! -f "$file" ]; then
@@ -39,9 +39,13 @@ cmd_add() {
     exit 1
   fi
 
-  # Extract anchor (trimmed text of the target line)
-  local anchor
+  # Extract anchors (trimmed text of the selected boundary lines).
+  local anchor end_anchor="" end_line_json="null"
   anchor=$(sed -n "${line}p" "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "$end_line" =~ ^[0-9]+$ ]] && (( end_line > line )) && (( end_line <= $(wc -l < "$file") )); then
+    end_anchor=$(sed -n "${end_line}p" "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    end_line_json="$end_line"
+  fi
 
   local id ts
   id=$(gen_uuid)
@@ -59,14 +63,18 @@ cmd_add() {
   echo "$murmurs" | jq \
     --arg id "$id" \
     --argjson line "$line" \
+    --argjson end_line "$end_line_json" \
     --arg anchor "$anchor" \
+    --arg end_anchor "$end_anchor" \
     --arg author "$author" \
     --arg message "$message" \
     --arg ts "$ts" \
-    '. + [{"id":$id,"line":$line,"anchor":$anchor,"author":$author,"message":$message,"created_at":$ts,"orphaned":false}] | sort_by(.line)' \
+    '. + [{"id":$id,"line":$line,"anchor":$anchor,"author":$author,"message":$message,"created_at":$ts,"orphaned":false} + (if $end_line == null then {} else {"end_line":$end_line,"end_anchor":$end_anchor} end)] | sort_by(.line)' \
     > "${sidecar}.tmp" && mv "${sidecar}.tmp" "$sidecar"
 
-  echo "Added murmur at ${file}:${line} [${author}] ${message}"
+  local location="L${line}"
+  if [ "$end_line_json" != "null" ]; then location="L:${line}-${end_line}"; fi
+  echo "Added murmur at ${file}:${location} [${author}] ${message}"
 }
 
 cmd_delete_file() {
@@ -160,7 +168,12 @@ cmd_scan() {
     if [ "$count" -gt 0 ]; then
       formatted=$(jq -r '
         map(
-          "  L\(.line // "?") [\(.author // "User")] \(.message // "")"
+          (if .end_line != null and .end_line > .line then
+            "  L:\(.line)-\(.end_line)"
+          else
+            "  L\(.line // "?")"
+          end)
+          + " [\(.author // "User")] \(.message // "")"
           + (if .orphaned == true then " [orphaned]" else "" end)
           + " (anchored: \"\(.anchor // "")\")"
         ) | join("\n")
@@ -208,8 +221,8 @@ ${formatted}")
 
 case "${1:-}" in
   add)
-    [ "$#" -lt 5 ] && { echo "Usage: murmur.sh add <file> <line> <author> <message>" >&2; exit 1; }
-    cmd_add "$2" "$3" "$4" "$5"
+    [ "$#" -lt 5 ] && { echo "Usage: murmur.sh add <file> <start-line> <author> <message> [end-line]" >&2; exit 1; }
+    cmd_add "$2" "$3" "$4" "$5" "${6:-}"
     ;;
   delete-file)
     [ "$#" -lt 2 ] && { echo "Usage: murmur.sh delete-file <file>" >&2; exit 1; }
@@ -223,7 +236,7 @@ case "${1:-}" in
     ;;
   *)
     echo "Usage: murmur.sh {add|delete-file|delete-all|scan} ..." >&2
-    echo "  add <file> <line> <author> <message>  — append a murmur to the file's sidecar" >&2
+    echo "  add <file> <start-line> <author> <message> [end-line]  — append a murmur to the file's sidecar" >&2
     echo "  delete-file <file>                     — remove the file's sidecar" >&2
     echo "  delete-all [dir]                       — remove all sidecars under dir (default: .)" >&2
     echo "  scan [dir]                             — list every murmur under dir (default: .), alias: list" >&2

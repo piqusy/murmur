@@ -15,6 +15,7 @@ export default tool({
     filepath: tool.schema.string().describe("Absolute or relative path of the file to annotate"),
     line: tool.schema.number().describe("1-indexed line number to annotate"),
     author: tool.schema.string().describe('Author name (e.g. "Claude"). Anything other than "User" gets agent styling.'),
+    end_line: tool.schema.number().optional().describe("Optional inclusive 1-indexed final line for a multiline murmur"),
     message: tool.schema.string().describe("Annotation text — no length limit"),
   },
   async execute(args, context) {
@@ -24,12 +25,18 @@ export default tool({
     const sidecar = abs + SIDECAR_SUFFIX
 
     let anchor = ""
+    let endAnchor = ""
+    let sourceLines: string[] = []
     try {
-      const lines = fs.readFileSync(abs, "utf-8").split("\n")
-      anchor = (lines[args.line - 1] || "").trim()
+      sourceLines = fs.readFileSync(abs, "utf-8").split("\n")
+      anchor = (sourceLines[args.line - 1] || "").trim()
     } catch {
-      // anchor stays empty when source is unreadable
+      // source may be unreadable; anchors stay empty
     }
+    const endLine = args.end_line && args.end_line > args.line && args.end_line <= sourceLines.length
+      ? args.end_line
+      : undefined
+    if (endLine) endAnchor = (sourceLines[endLine - 1] || "").trim()
 
     let murmurs: Murmur[] = []
     try {
@@ -42,6 +49,7 @@ export default tool({
     murmurs.push({
       id: randomUUID(),
       line: args.line,
+      ...(endLine ? { end_line: endLine, end_anchor: endAnchor } : {}),
       anchor,
       author: args.author,
       message: args.message,
@@ -54,6 +62,6 @@ export default tool({
     fs.writeFileSync(tmp, JSON.stringify(murmurs, null, 2))
     fs.renameSync(tmp, sidecar)
 
-    return `Added murmur at ${args.filepath}:${args.line} [${args.author}] ${args.message}`
+    return `Added murmur at ${args.filepath}:${endLine ? `L:${args.line}-${endLine}` : args.line} [${args.author}] ${args.message}`
   },
 })
