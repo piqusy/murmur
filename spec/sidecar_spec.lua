@@ -43,6 +43,50 @@ describe("write_sidecar + read_sidecar roundtrip", function()
   end)
 end)
 
+describe("multiline murmurs", function()
+  it("persists visual command range boundaries", function()
+    M.setup()
+    local file = vim.fn.tempname()
+    vim.fn.writefile({ "one", "two", "three", "four" }, file)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    vim.ui.input = function(_, callback) callback("review selection") end
+
+    vim.cmd("normal! 2G0V4G")
+    M.add_visual_murmur()
+    assert.is_true(vim.wait(100, function()
+      return vim.fn.filereadable(file .. ".murmur.json") == 1
+    end))
+
+    local murmurs = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(1, #murmurs)
+    assert.are.equal(2, murmurs[1].line)
+    assert.are.equal(4, murmurs[1].end_line)
+    assert.are.equal("two", murmurs[1].anchor)
+    assert.are.equal("four", murmurs[1].end_anchor)
+    local has_range_label = false
+    for _, extmark in ipairs(vim.api.nvim_buf_get_extmarks(0, -1, 0, -1, { details = true })) do
+      local details = extmark[4]
+      if details.virt_lines then
+        local header = ""
+        for _, chunk in ipairs(details.virt_lines[1]) do
+          header = header .. chunk[1]
+        end
+        has_range_label = header:find("L:2%-4", 1) ~= nil
+      end
+    end
+    assert.is_true(has_range_label)
+    vim.api.nvim_buf_set_lines(0, 0, 0, false, { "zero" })
+    vim.cmd("write")
+
+    local moved_murmurs = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(3, moved_murmurs[1].line)
+    assert.are.equal(5, moved_murmurs[1].end_line)
+    vim.cmd("bwipeout!")
+    os.remove(file)
+    os.remove(file .. ".murmur.json")
+  end)
+end)
+
 describe("write_sidecar empty-data handling", function()
   it("deletes the sidecar for empty data instead of writing []", function()
     local tmp = "/tmp/murmur_empty_delete.json"

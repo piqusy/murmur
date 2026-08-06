@@ -87,6 +87,26 @@ describe("scanMurmurFiles / formatMurmurBatch", () => {
     expect(result.annotatedFileCount).toBe(1)
   })
 
+  it("formats a multiline murmur with its inclusive line range", () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "murmur-spec-"))
+    writeFileSync(join(fixtureDir, "selected.ts"), "first\nsecond\nthird\nfourth\n")
+    writeFileSync(
+      join(fixtureDir, "selected.ts.murmur.json"),
+      JSON.stringify([
+        {
+          line: 2,
+          end_line: 4,
+          anchor: "second",
+          end_anchor: "fourth",
+          author: "User",
+          message: "review this selection",
+        },
+      ]),
+    )
+
+    expect(formatMurmurBatch(scanMurmurFiles(fixtureDir))).toContain("L:2-4 [User] review this selection")
+  })
+
   it("reports clear, invalid, and missing-source files with correct statuses and counts", () => {
     fixtureDir = mkdtempSync(join(tmpdir(), "murmur-spec-"))
 
