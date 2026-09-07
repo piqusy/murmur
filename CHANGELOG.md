@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.4.1] — 2026-09-07
 
 ### Fixed
 - OMP mid-turn annotations now block targeted operations with the note in the reason until the next model-context boundary. The unsupported `additionalContext` return was silently ignored; same-batch operations cannot bypass review, post-context retries proceed, and revised notes require another review.
