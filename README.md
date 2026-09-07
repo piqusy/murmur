@@ -299,6 +299,20 @@ read hooks and write tools. The extension ships in this repo at
 5. **`delete_file_murmurs` / `delete_all_murmurs` tools** (write) — remove a
    single file's sidecar or all sidecars in the project.
 
+6. **`tool_call` preflight** — a new or changed annotation on a targeted file
+   blocks targeted `read` / `edit` / `write` / `multiedit` operations until the
+   next model-context boundary. Every queued operation in the same batch stays
+   blocked, with the note in its reason. After the agent receives the results,
+   an unchanged retry proceeds; another sidecar change requires another review.
+   Notes already delivered by the startup hook do not block again.
+   `add_murmur` invalidates delivery state for the file: its result shows only
+   the appended note, so merged annotations must be reviewed before editing.
+
+Run `bun scripts/murmur-omp-smoke.ts` to exercise this behavior through the
+installed OMP loader, event runner, and tool wrapper, using temporary files.
+Requires a source-distributed `omp` on PATH; alternatively set
+`MURMUR_OMP_ROOT` to the coding-agent package directory containing `src/`.
+
 To install, symlink from your clone of this repo:
 
 ```bash
@@ -313,6 +327,10 @@ mkdir -p ~/.pi/agent/extensions/murmur
 ln -s ~/src/murmur/integrations/omp/index.ts      ~/.pi/agent/extensions/murmur/index.ts
 ln -s ~/src/murmur/integrations/omp/package.json  ~/.pi/agent/extensions/murmur/package.json
 ```
+
+OMP profiles have separate extension directories. For `omp --profile work`,
+install under `~/.omp/profiles/work/agent/extensions/`, not the default
+`~/.omp/agent/extensions/`. Restart OMP after installing or updating the bridge.
 
 ### Claude Code
 

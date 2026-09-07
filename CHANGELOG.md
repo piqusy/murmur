@@ -1,4 +1,15 @@
 # Changelog
+
+## Unreleased
+
+### Fixed
+- OMP mid-turn annotations now block targeted operations with the note in the reason until the next model-context boundary. The unsupported `additionalContext` return was silently ignored; same-batch operations cannot bypass review, post-context retries proceed, and revised notes require another review.
+- `add_murmur` invalidates both delivery caches instead of acknowledging the merged sidecar; unseen user notes still block edits after an agent appends its own note.
+
+### Changed
+- Replaced source-text integration checks with an installed-OMP smoke scenario covering pre-write blocking, same-batch operations, post-context retries, revised notes, startup delivery, and unannotated files.
+- Documented profile-specific OMP extension installation.
+
 ## [0.4.0] — 2026-08-04
 
 ### Added

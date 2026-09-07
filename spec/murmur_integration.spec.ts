@@ -1,64 +1,13 @@
-// Murmur integration regression tests. Most of these run outside Murmur's
-// plenary harness and only verify the integration source files exist and
-// ship the expected tool surfaces — see the "scanMurmurFiles / formatMurmurBatch"
-// block below for actual runtime behavior coverage.
+// Shared-core behavior regressions. Installed OMP hook/wrapper coverage lives
+// in scripts/murmur-omp-smoke.ts.
 
 import { describe, it, expect, afterEach } from "bun:test"
 import { readMurmurFile } from "../integrations/shared/murmur-core.ts"
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { resolve, join } from "node:path"
+import { join } from "node:path"
 import { scanMurmurFiles, formatMurmurBatch } from "../integrations/shared/murmur-core.ts"
 
-const REPO_ROOT = resolve(import.meta.dir, "..")
-const OMP_INDEX = resolve(REPO_ROOT, "integrations/omp/index.ts")
-const OPENCODE_DIR = resolve(REPO_ROOT, "integrations/opencode")
-const SHARED_CORE = resolve(REPO_ROOT, "integrations/shared/murmur-core.ts")
-const REQUIRED_OMP_TOOLS = [
-  "read_murmur",
-  "read_murmurs",
-  "scan_murmurs",
-  "add_murmur",
-  "delete_file_murmurs",
-  "delete_all_murmurs",
-] as const
-
-describe("Murmur integration surface", () => {
-  it("ships the shared read core", () => {
-    expect(existsSync(SHARED_CORE)).toBe(true)
-    const source = readFileSync(SHARED_CORE, "utf-8")
-    expect(source).toContain("export function readMurmurFile")
-    expect(source).toContain("export function readMurmurFiles")
-    expect(source).toContain("export function scanMurmurFiles")
-    expect(source).toContain("export function getMurmurSidecarFingerprint")
-  })
-
-  it("registers every documented read and write tool in OMP", () => {
-    const source = readFileSync(OMP_INDEX, "utf-8")
-    for (const toolName of REQUIRED_OMP_TOOLS) {
-      expect(source).toContain(`name: "${toolName}"`)
-    }
-    expect(source).toContain('pi.on("tool_call"')
-  })
-
-  it("OMP preflight inspects hashline multi-section inputs", () => {
-    const source = readFileSync(OMP_INDEX, "utf-8")
-    expect(source).toContain("getModifiedFilepathsFromEditInput")
-    expect(source).toMatch(/\[PATH#TAG\]/)
-  })
-
-  it("OpenCode ships batch and scan tools alongside the legacy read_murmur", () => {
-    for (const file of [
-      "read_murmur.ts",
-      "scan_murmurs.ts",
-      "add_murmur.ts",
-      "delete_file_murmurs.ts",
-      "delete_all_murmurs.ts",
-    ]) {
-      expect(existsSync(resolve(OPENCODE_DIR, file))).toBe(true)
-    }
-  })
-})
 
 describe("scanMurmurFiles / formatMurmurBatch", () => {
   let fixtureDir: string | undefined
@@ -207,15 +156,4 @@ describe("readMurmurFile per-file status", () => {
   })
 })
 
-describe("OMP read_murmur wrapper exposes per-file status", () => {
-  it("does not claim 'Clear to edit.' for invalid_sidecar or missing_source", () => {
-    // The wrapper must not lie about non-`clear` results. Structural check:
-    // the wrapper body must not return the unconditional "Clear to edit."
-    // string when status is invalid_sidecar or missing_source.
-    const source = readFileSync(OMP_INDEX, "utf-8")
-    expect(source).toContain("invalid_sidecar")
-    expect(source).toContain("missing_source")
-    expect(source).not.toMatch(/`Clear to edit\.`\s*\}/)
-  })
-})
 

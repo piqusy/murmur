@@ -96,8 +96,19 @@ function getSidecarFingerprint(absolutePath: string): string {
 
 export default function murmurExtension(pi: ExtensionAPI): void {
   const deliveredSidecarFingerprints = new Map<string, string>();
+  const pendingSidecarFingerprints = new Map<string, string>();
+
+  pi.on("context", async () => {
+    // Calls in one assistant batch are prepared before their results reach the
+    // model. Only the next model-context boundary acknowledges those notes.
+    for (const [file, fingerprint] of pendingSidecarFingerprints) {
+      deliveredSidecarFingerprints.set(file, fingerprint);
+    }
+    pendingSidecarFingerprints.clear();
+  });
 
   pi.on("before_agent_start", async (event) => {
+    pendingSidecarFingerprints.clear();
     const cwd = event.systemPromptOptions?.cwd || process.cwd();
     const result = scanMurmurFiles(cwd);
     const annotatedFiles = result.files.filter((file) => file.status === "annotated");
@@ -131,7 +142,15 @@ export default function murmurExtension(pi: ExtensionAPI): void {
     });
 
     if (freshFiles.length === 0) return;
-    return { additionalContext: formatMurmurBatch({ ...result, files: freshFiles }) };
+    const reason = [
+      "New or changed murmurs must be reviewed before this operation. Honor these constraints, then retry:",
+      formatMurmurBatch({ ...result, files: freshFiles }),
+    ].join("\n");
+    // Keep every operation in this batch blocked until the model sees the note.
+    for (const file of freshFiles) {
+      pendingSidecarFingerprints.set(file.absolutePath, getSidecarFingerprint(file.absolutePath));
+    }
+    return { block: true, reason };
   });
 
   // Per-file lookup — fallback for agents that want to inspect a specific file.
@@ -313,7 +332,9 @@ export default function murmurExtension(pi: ExtensionAPI): void {
       const tmp = sidecar + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(murmurs, null, 2));
       fs.renameSync(tmp, sidecar);
-      deliveredSidecarFingerprints.set(abs, getSidecarFingerprint(abs));
+      // The result shows only the appended note, not other merged annotations.
+      deliveredSidecarFingerprints.delete(abs);
+      pendingSidecarFingerprints.delete(abs);
 
       return {
         content: [{ type: "text" as const, text: `Added murmur at ${params.filepath}:${endLine ? `L:${params.line}-${endLine}` : params.line} [${params.author}] ${params.message}` }],
@@ -351,6 +372,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
         // already gone
       }
       deliveredSidecarFingerprints.delete(abs);
+      pendingSidecarFingerprints.delete(abs);
 
       return {
         content: [{ type: "text" as const, text: count > 0 ? `Deleted ${count} murmur(s) from ${params.filepath}` : `No murmurs found for ${params.filepath}` }],
@@ -382,6 +404,7 @@ export default function murmurExtension(pi: ExtensionAPI): void {
         }
       }
       deliveredSidecarFingerprints.clear();
+      pendingSidecarFingerprints.clear();
 
       return {
         content: [{ type: "text" as const, text: `Deleted ${count} sidecar file(s) under ${dir}` }],
