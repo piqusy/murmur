@@ -1,5 +1,5 @@
 -- spec/sidecar_spec.lua
--- Run: nvim --headless --noplugin -u NORC -c "set rtp+=~/development/murmur" -c "set rtp+=<plenary>" -c "lua require('plenary.busted')" -c "qa"
+-- Run: nvim --headless --noplugin -u NORC -c "set rtp+=~/development/murmur" -c "set rtp+=<plenary>" -c "lua require('plenary.busted').run('spec/sidecar_spec.lua')"
 local M = require("murmur")
 local uv = vim.uv
 
@@ -43,15 +43,21 @@ describe("write_sidecar + read_sidecar roundtrip", function()
   end)
 end)
 
+-- :normal! leaves the buffer inside visual mode and never sets the '< / '>
+-- marks; feed keys followed by <Esc> to end the selection like a real user.
+local function visual_keys(keys)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys .. "\27", true, false, "t"), "x", false)
+end
+
 describe("multiline murmurs", function()
   it("persists visual command range boundaries", function()
-    M.setup()
+    M.setup({ render_mode = "box" })
     local file = vim.fn.tempname()
     vim.fn.writefile({ "one", "two", "three", "four" }, file)
     vim.cmd("edit " .. vim.fn.fnameescape(file))
     vim.ui.input = function(_, callback) callback("review selection") end
 
-    vim.cmd("normal! 2G0V4G")
+    visual_keys("2G0V4G")
     M.add_visual_murmur()
     assert.is_true(vim.wait(100, function()
       return vim.fn.filereadable(file .. ".murmur.json") == 1
@@ -81,6 +87,100 @@ describe("multiline murmurs", function()
     local moved_murmurs = M._read_sidecar(file .. ".murmur.json")
     assert.are.equal(3, moved_murmurs[1].line)
     assert.are.equal(5, moved_murmurs[1].end_line)
+    vim.cmd("bwipeout!")
+    os.remove(file)
+    os.remove(file .. ".murmur.json")
+  end)
+end)
+
+describe("charwise selection murmurs", function()
+  it("anchors exact selected text with columns, text, and highlight", function()
+    M.setup({ render_mode = "box" })
+    local file = vim.fn.tempname()
+    vim.fn.writefile({ "local alpha = 1", "local beta = 2", "local gamma = 3" }, file)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    vim.ui.input = function(_, callback) callback("rename this binding") end
+
+    visual_keys("2G0fbve")
+    M.add_visual_murmur()
+    assert.is_true(vim.wait(100, function()
+      return vim.fn.filereadable(file .. ".murmur.json") == 1
+    end))
+
+    local murmurs = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(1, #murmurs)
+    assert.are.equal(2, murmurs[1].line)
+    assert.are.equal(6, murmurs[1].col_start)
+    assert.are.equal(10, murmurs[1].col_end)
+    assert.are.equal("beta", murmurs[1].text)
+
+    local hl_ok = false
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, -1, 0, -1, { details = true })) do
+      local d = mark[4]
+      if d.hl_group == "MurmurSelection" then
+        hl_ok = mark[2] == 1 and mark[3] == 6 and d.end_row == 1 and d.end_col == 10
+      end
+    end
+    assert.is_true(hl_ok)
+
+    -- columns drift with in-buffer edits: prepend text before the selection
+    vim.cmd("normal! 2gg0iXXXX")
+    vim.cmd("write")
+    vim.wait(100)
+    local drifted = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(10, drifted[1].col_start)
+    assert.are.equal(14, drifted[1].col_end)
+    vim.cmd("bwipeout!")
+    os.remove(file)
+    os.remove(file .. ".murmur.json")
+  end)
+
+  it("captures live selection when invoked from a visual-mode keymap", function()
+    M.setup({ render_mode = "box" })
+    local file = vim.fn.tempname()
+    vim.fn.writefile({ "local alpha = 1", "local beta = 2", "local gamma = 3" }, file)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    vim.ui.input = function(_, callback) callback("rename this binding") end
+
+    -- the user-facing keymap fires while visual mode is still active, when
+    -- the '< / '> marks are not yet set
+    vim.keymap.set("x", "<Plug>(MurmurTestAdd)", function() M.add_visual_murmur() end)
+    visual_keys("2G0fbve<Plug>(MurmurTestAdd)")
+    assert.is_true(vim.wait(100, function()
+      return vim.fn.filereadable(file .. ".murmur.json") == 1
+    end))
+    vim.keymap.del("x", "<Plug>(MurmurTestAdd)")
+
+    local murmurs = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(1, #murmurs)
+    assert.are.equal(2, murmurs[1].line)
+    assert.are.equal(6, murmurs[1].col_start)
+    assert.are.equal(10, murmurs[1].col_end)
+    assert.are.equal("beta", murmurs[1].text)
+    vim.cmd("bwipeout!")
+    os.remove(file)
+    os.remove(file .. ".murmur.json")
+  end)
+
+  it("joins multiline charwise selections with newlines", function()
+    local file = vim.fn.tempname()
+    vim.fn.writefile({ "local alpha = 1", "local beta = 2", "local gamma = 3" }, file)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    vim.ui.input = function(_, callback) callback("tidy these bindings") end
+
+    visual_keys("1G07|vje")
+    M.add_visual_murmur()
+    assert.is_true(vim.wait(100, function()
+      return vim.fn.filereadable(file .. ".murmur.json") == 1
+    end))
+
+    local murmurs = M._read_sidecar(file .. ".murmur.json")
+    assert.are.equal(1, #murmurs)
+    assert.are.equal(1, murmurs[1].line)
+    assert.are.equal(2, murmurs[1].end_line)
+    assert.are.equal(6, murmurs[1].col_start)
+    assert.are.equal(10, murmurs[1].col_end)
+    assert.are.equal("alpha = 1\nlocal beta", murmurs[1].text)
     vim.cmd("bwipeout!")
     os.remove(file)
     os.remove(file .. ".murmur.json")

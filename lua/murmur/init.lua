@@ -95,6 +95,7 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "MurmurAgentSign", hl.agent_sign)
   vim.api.nvim_set_hl(0, "MurmurBody", hl.body)
   vim.api.nvim_set_hl(0, "MurmurBorder", hl.border)
+  vim.api.nvim_set_hl(0, "MurmurSelection", hl.selection)
   vim.api.nvim_set_hl(0, "MurmurOrphan", hl.orphan)
   vim.api.nvim_set_hl(0, "MurmurForeign", hl.foreign)
 end
@@ -173,6 +174,10 @@ local function murmur_location(murmur)
   local end_line = tonumber(murmur.end_line)
   if end_line and end_line > line then
     return string.format("L:%d-%d", line, end_line)
+  end
+  local col_start = tonumber(murmur.col_start)
+  if col_start then
+    return string.format("L%d:%d-%d", line, col_start + 1, tonumber(murmur.col_end) or col_start)
   end
   return "L" .. tostring(line)
 end
@@ -296,25 +301,36 @@ local function sync_back(bufnr)
 
   for _, m in ipairs(murmurs) do
     local mark_ids = marks[m.id] or {}
-    local ok, start_pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_ids.start, {})
-    if ok and start_pos and start_pos[1] ~= nil then
-      local new_line = start_pos[1] + 1
+    local ok, pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_ids.start, { details = true })
+    if ok and type(pos) == "table" and pos[1] ~= nil then
+      local row = pos[1]
+      local details = type(pos[3]) == "table" and pos[3] or {}
+      local new_line = row + 1
       if new_line ~= m.line then
         m.line = new_line
-        m.anchor = trim(vim.api.nvim_buf_get_lines(bufnr, start_pos[1], start_pos[1] + 1, false)[1] or "")
+        m.anchor = trim(vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or "")
         changed = true
       end
-    end
-
-    if m.end_line and mark_ids.finish then
-      local ok_end, end_pos = pcall(vim.api.nvim_buf_get_extmark_by_id, bufnr, ns_id, mark_ids.finish, {})
-      if ok_end and end_pos and end_pos[1] ~= nil then
-        local new_end_line = end_pos[1] + 1
-        if new_end_line ~= m.end_line then
-          m.end_line = new_end_line
-          m.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, end_pos[1], end_pos[1] + 1, false)[1] or "")
+      -- selection columns ride the same extmark: start position plus
+      -- end_row/end_col in the details table
+      if m.col_start ~= nil and pos[2] ~= m.col_start then
+        m.col_start = pos[2]
+        changed = true
+      end
+      local det_end_row = tonumber(details.end_row) or row
+      if det_end_row > row then
+        if det_end_row + 1 ~= m.end_line then
+          m.end_line = det_end_row + 1
+          m.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, det_end_row, det_end_row + 1, false)[1] or "")
           changed = true
         end
+        if m.col_end ~= nil and details.end_col ~= nil and details.end_col ~= m.col_end then
+          m.col_end = details.end_col
+          changed = true
+        end
+      elseif m.col_start ~= nil and m.end_line == nil and details.end_col ~= nil and details.end_col ~= m.col_end then
+        m.col_end = details.end_col
+        changed = true
       end
     end
   end
@@ -397,6 +413,11 @@ function M.render(bufnr)
         sign_text = config.options.sign_text,
         sign_hl_group = sign_hl,
       }
+      local col_start = tonumber(m.col_start)
+      if col_start then
+        opts.hl_group = "MurmurSelection"
+        opts.hl_mode = "combine"
+      end
 
       if show_content then
         if render_mode == "inline" then
@@ -424,9 +445,14 @@ function M.render(bufnr)
           end
           content_w = math.max(28, content_w) + 2
           -- header: embed line number on the right when there is room
-          local linetext = tonumber(m.end_line) and tonumber(m.end_line) > line
-            and murmur_location(m)
-            or ":" .. tostring(line)
+          local linetext
+          if tonumber(m.col_start) then
+            linetext = murmur_location(m)
+          elseif tonumber(m.end_line) and tonumber(m.end_line) > line then
+            linetext = murmur_location(m)
+          else
+            linetext = ":" .. tostring(line)
+          end
           local linetxt_w = vim.fn.strdisplaywidth(linetext)
           local gap_w = content_w - vim.fn.strdisplaywidth(header_label) + 2
           local right_side
@@ -460,16 +486,21 @@ function M.render(bufnr)
         end
       end
 
-      local ok, start_id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, row, 0, opts)
-      if ok then
-        local mark_ids = { start = start_id }
-        local end_line = tonumber(m.end_line)
-        if end_line and end_line > line then
-          local end_row = math.max(0, math.min(end_line - 1, linecount - 1))
-          local end_ok, finish_id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, end_row, 0, { right_gravity = true })
-          if end_ok then mark_ids.finish = finish_id end
+      -- end bounds on the same extmark: multiline end tracking and/or the
+      -- selection highlight range
+      local end_line = tonumber(m.end_line)
+      if col_start or (end_line and end_line > line) then
+        local end_row = math.max(0, math.min((end_line or line) - 1, linecount - 1))
+        opts.end_row = end_row
+        if col_start then
+          local end_text = vim.api.nvim_buf_get_lines(bufnr, end_row, end_row + 1, false)[1] or ""
+          opts.end_col = math.max(0, math.min(tonumber(m.col_end) or #end_text, #end_text))
         end
-        marks[m.id] = mark_ids
+      end
+
+      local ok, start_id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, row, col_start or 0, opts)
+      if ok then
+        marks[m.id] = { start = start_id }
       end
   end
   end
@@ -521,6 +552,27 @@ function M.add(opts)
     murmur.end_line = end_row
     murmur.end_anchor = trim(vim.api.nvim_buf_get_lines(bufnr, end_row - 1, end_row, false)[1] or "")
   end
+  -- character-precise selection: 0-based byte cols, col_end exclusive
+  local col_start = tonumber(opts.col_start)
+  if col_start then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, row - 1, end_row, false)
+    local first = lines[1] or ""
+    local last = lines[#lines] or first
+    col_start = math.max(0, math.min(col_start, #first))
+    local col_end = math.max(0, math.min(tonumber(opts.col_end) or #last, #last))
+    murmur.col_start = col_start
+    murmur.col_end = col_end
+    if opts.text ~= nil then
+      murmur.text = tostring(opts.text)
+    elseif end_row > row then
+      local parts = { first:sub(col_start + 1) }
+      for i = 2, #lines - 1 do parts[#parts + 1] = lines[i] end
+      parts[#parts + 1] = last:sub(1, col_end)
+      murmur.text = table.concat(parts, "\n")
+    else
+      murmur.text = first:sub(col_start + 1, col_end)
+    end
+  end
   table.insert(murmurs, murmur)
   sort_murmurs(murmurs)
   mem[bufnr] = murmurs
@@ -529,7 +581,7 @@ function M.add(opts)
   return true
 end
 
-function M.add_murmur(line1, line2)
+function M.add_murmur(line1, line2, sel)
   local bufnr = vim.api.nvim_get_current_buf()
   if not sidecar_path(bufnr) then
     vim.notify("murmur: buffer has no file path", vim.log.levels.WARN)
@@ -546,6 +598,8 @@ function M.add_murmur(line1, line2)
         bufnr = bufnr,
         line = line1,
         end_line = line2,
+        col_start = sel and sel.col_start or nil,
+        col_end = sel and sel.col_end or nil,
         author = "User",
         message = input,
       })
@@ -553,11 +607,50 @@ function M.add_murmur(line1, line2)
   end)
 end
 
+-- Resolve a command range into 0-based byte column bounds for the visual
+-- selection that produced it. Returns nil unless the range matches the
+-- '< / '> marks and the selection was charwise: linewise and blockwise
+-- selections anchor to whole lines.
+local function selection_bounds(line1, line2)
+  local p1, p2 = vim.fn.getpos("'<"), vim.fn.getpos("'>")
+  if p1[2] ~= line1 or p2[2] ~= line2 then return nil end
+  if vim.fn.visualmode() ~= "v" then return nil end
+  -- inclusive default: '> col is the last selected char (1-based) → 0-based
+  -- exclusive end. With 'selection=exclusive' it already points one past.
+  local exclusive = vim.o.selection == "exclusive"
+  return { col_start = p1[3] - 1, col_end = exclusive and p2[3] - 1 or p2[3] }
+end
+
+-- Bounds of the selection while visual mode is still active (invoked from a
+-- visual-mode keymap): the v mark is the anchor, the cursor the end.
+-- Returns line1, line2, sel.
+local function live_selection_bounds()
+  local mode = vim.fn.mode()
+  if not mode:find("^[vV\22]") then return nil end
+  local line1, line2 = vim.fn.line("v"), vim.fn.line(".")
+  local col1, col2 = vim.fn.col("v"), vim.fn.col(".")
+  if line1 > line2 or (line1 == line2 and col1 > col2) then
+    line1, line2 = line2, line1
+    col1, col2 = col2, col1
+  end
+  if mode ~= "v" then
+    return line1, line2, nil
+  end
+  -- 0-based byte cols, end exclusive; with 'selection=exclusive' the cursor
+  -- already sits one past the last selected char
+  local exclusive = vim.o.selection == "exclusive"
+  return line1, line2, { col_start = col1 - 1, col_end = exclusive and col2 - 1 or col2 }
+end
+
 function M.add_visual_murmur()
-  local line1 = vim.fn.line("v")
-  local line2 = vim.fn.line(".")
-  if line1 > line2 then line1, line2 = line2, line1 end
-  M.add_murmur(line1, line2)
+  local line1, line2, sel = live_selection_bounds()
+  if not line1 then
+    line1 = vim.fn.line("'<")
+    line2 = vim.fn.line("'>")
+    if line1 > line2 then line1, line2 = line2, line1 end
+    sel = selection_bounds(line1, line2)
+  end
+  M.add_murmur(line1, line2, sel)
 end
 
 function M.delete_murmur()
@@ -871,7 +964,8 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_user_command("MurmurAdd", function(command)
-    M.add_murmur(command.line1, command.line2)
+    local sel = command.range > 0 and selection_bounds(command.line1, command.line2) or nil
+    M.add_murmur(command.line1, command.line2, sel)
   end, { range = true })
   vim.api.nvim_create_user_command("MurmurDelete", function() M.delete_murmur() end, {})
   vim.api.nvim_create_user_command("MurmurDeleteFile", function()
@@ -904,13 +998,16 @@ function M.setup(opts)
     vim.api.nvim_buf_clear_namespace(0, ns_id, 0, -1)
   end, {})
 
-  -- restore persisted render mode from stdpath('data')/murmur.json
-  local f = io.open(state_path, "r")
-  if f then
-    local ok, data = pcall(vim.json.decode, f:read("*a"))
-    f:close()
-    if ok and data.render_mode == "inline" then
-      render_mode = "inline"
+  -- restore persisted render mode from stdpath('data')/murmur.json, unless
+  -- setup() pinned render_mode explicitly
+  if not config.render_mode_pinned then
+    local f = io.open(state_path, "r")
+    if f then
+      local ok, data = pcall(vim.json.decode, f:read("*a"))
+      f:close()
+      if ok and data.render_mode == "inline" then
+        render_mode = "inline"
+      end
     end
   end
   -- setup runs at VeryLazy, after the initial BufReadPost/BufEnter already

@@ -16,6 +16,7 @@ M.defaults = {
     agent_sign   = { fg = "#d3869b" },
     body   = { fg = "#ebdbb2" },
     border = { fg = "#928374" },
+    selection = { bg = "#31443d" }, -- background over the selected text range
     orphan = { fg = "#fe8019", bold = true },
     foreign = { fg = "#928374", italic = true }, -- gray, dimmed
   },
@@ -28,6 +29,8 @@ function M.setup(opts)
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts)
   -- validate render_mode
   if M.options.render_mode ~= "inline" then M.options.render_mode = "box" end
+  -- an explicit setup() pin beats the persisted :MurmurMode toggle
+  M.render_mode_pinned = opts.render_mode ~= nil
   return M.options
 end
 

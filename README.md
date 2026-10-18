@@ -41,7 +41,7 @@ Inline line and range annotations for Neovim - leave instructions for your AI ag
 - **Always-on sign indicator** - `◉` in the sign column whenever a murmur exists
 - **Content wrapping** - long messages wrap to fit the window (box mode)
 - **Line-drift tracking** - extmarks follow text edits; a content anchor re-locates murmurs after external edits
-- **Visual-range annotations** - run `:MurmurAdd` on a visual line selection to anchor a murmur from `L:10-14`
+- **Selection-precise annotations** - run `:MurmurAdd` on a visual selection: linewise ranges anchor `L:10-14`, charwise selections anchor the exact text (`L12:5-20`), highlighted in the buffer and stored with its text in the sidecar
 - **Sidecar storage** - `<file>.murmur.json` alongside each file (gitignored globally)
 - **Pluggable picker** - snacks / telescope / fzf-lua / builtin `vim.ui.select`
 - **Zero dependencies** - works on bare Neovim
@@ -64,6 +64,7 @@ Inline line and range annotations for Neovim - leave instructions for your AI ag
   end,
   keys = {
     { "<leader>ma", "<cmd>MurmurAdd<cr>",    desc = "Murmur Add" },
+    { "<leader>ma", "<cmd>MurmurAdd<cr>",    desc = "Murmur Add (selection)", mode = "v" },
     { "<leader>md", "<cmd>MurmurDelete<cr>", desc = "Murmur Delete" },
     { "<leader>me", "<cmd>MurmurEdit<cr>",   desc = "Murmur Edit" },
     { "<leader>ml", "<cmd>MurmurList<cr>",   desc = "Murmur List" },
@@ -80,7 +81,7 @@ Inline line and range annotations for Neovim - leave instructions for your AI ag
 
 | Command | Description |
 |---|---|
-| `:MurmurAdd` | Add a murmur on the current line, or on the selected visual line range |
+| `:MurmurAdd` | Add a murmur on the current line, on the selected visual line range, or on the exact charwise selection |
 | `:MurmurDelete` | Select and delete a single murmur |
 | `:MurmurDeleteFile` | Delete all murmurs in the current file |
 | `:MurmurDeleteAll` | Delete all murmurs across every open buffer (with confirm) |
@@ -108,6 +109,7 @@ require("murmur").setup({
     border = { fg = "#928374" },
     orphan = { fg = "#fe8019", bold = true },
     foreign = { fg = "#928374", italic = true }, -- gray, dimmed (diff-view foreign revision)
+    selection = { bg = "#31443d" }, -- background over a charwise-selected text range
   },
 })
 ```
@@ -162,11 +164,21 @@ murmur objects:
 |---|---|---|
 | `id` | string | UUID, stable across sessions |
 | `line` | number | 1-indexed source line |
-| `anchor` | string | Line text for drift correction after external edits |
+| `end_line` | number | Optional 1-indexed final line of a multiline range (inclusive) |
+| `anchor` | string | Line text of `line` for drift correction after external edits |
+| `end_anchor` | string | Line text of `end_line` for drift correction |
+| `col_start` | number | Optional 0-based byte column where a charwise selection starts on `line` |
+| `col_end` | number | 0-based exclusive byte column where the selection ends (on `end_line` when multiline) |
+| `text` | string | Exact selected text, `\n`-joined across lines |
 | `author` | string | `"User"` gets user styling (teal); anything else gets agent styling (purple) |
 | `message` | string | Annotation text, no length limit |
 | `created_at` | string | ISO 8601 UTC timestamp |
 | `orphaned` | boolean | `true` when the anchor text can't be relocated within ±20 lines |
+
+Selection fields come from charwise visual selections in Neovim (`v`). Linewise
+(`V`) and blockwise (`CTRL-V`) selections anchor whole lines. The extmark keeps
+`col_start`/`col_end` in sync with in-buffer edits, like line drift. Agents can
+read `text` to see exactly what the user highlighted.
 
 ### Reading murmurs (harness side)
 
@@ -213,7 +225,11 @@ require("murmur").add({
   message = "Refactored — see commit abc123",
   line = 42,           -- optional, defaults to cursor line
   end_line = 48,       -- optional inclusive final line for a multiline murmur
+  col_start = 6,       -- optional 0-based byte column of a selection start on `line`
+  col_end = 10,        -- optional 0-based exclusive end column (on `end_line` when multiline)
+  text = "selected",   -- optional exact selection text; extracted from the buffer when omitted
   bufnr = 0,           -- optional, defaults to current buffer
+})
 ```
 
 Delete all murmurs in a single file (returns count removed):
