@@ -40,7 +40,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          # 26: node --check strips TypeScript types; 24 --check rejects them
+          node-version: 26
 
       - name: node --check every integration module
         run: |
