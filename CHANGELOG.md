@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] — 2026-10-18
+
+### Added
+- Charwise visual selection murmurs: `:MurmurAdd` (or the new visual-mode `<leader>ma` example) anchors the exact selected text — `col_start`/`col_end` (0-based byte columns, end exclusive) and the joined `text` are stored in the sidecar, the selection is highlighted with the new `highlights.selection` group, and the box header shows `L12:5-20`. Linewise and blockwise selections keep the whole-line `L:START-END` behavior.
+- `M.add` accepts optional `col_start`, `col_end`, and `text`; columns are clamped and the text is extracted from the buffer when omitted.
+- Selection columns drift with in-buffer edits like line ranges (tracked on the anchor extmark, no separate finish mark).
+
+### Fixed
+- `setup({ render_mode = ... })` now pins the render mode over the persisted `:MurmurMode` toggle; previously an explicit `render_mode` was silently overridden by `stdpath('data')/murmur.json`.
+
 ## [0.4.1] — 2026-09-07
 
 ### Fixed
