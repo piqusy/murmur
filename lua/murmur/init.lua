@@ -482,7 +482,7 @@ function M.render(bufnr)
           local footer_line = " ╰" .. string.rep("─", content_w) .. "╯"
           table.insert(vl, { { footer_line, "MurmurBorder" } })
           opts.virt_lines = vl
-          opts.virt_lines_above = false
+          opts.virt_lines_above = true
         end
       end
 

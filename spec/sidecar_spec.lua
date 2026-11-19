@@ -50,6 +50,33 @@ local function visual_keys(keys)
 end
 
 describe("multiline murmurs", function()
+  it("renders the box above the start of the anchored range", function()
+    M.setup({ render_mode = "box" })
+    local file = vim.fn.tempname()
+    vim.fn.writefile({ "one", "two", "three", "four" }, file)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    vim.ui.input = function(_, callback) callback("review selection") end
+
+    visual_keys("2G0V4G")
+    M.add_visual_murmur()
+    assert.is_true(vim.wait(100, function()
+      return vim.fn.filereadable(file .. ".murmur.json") == 1
+    end))
+
+    local box
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, -1, 0, -1, { details = true })) do
+      if mark[4].virt_lines then box = mark end
+    end
+    assert.is_not_nil(box)
+    assert.are.equal(1, box[2])
+    assert.are.equal(0, box[3])
+    assert.are.equal(3, box[4].end_row)
+    assert.is_true(box[4].virt_lines_above)
+    vim.cmd("bwipeout!")
+    os.remove(file)
+    os.remove(file .. ".murmur.json")
+  end)
+
   it("persists visual command range boundaries", function()
     M.setup({ render_mode = "box" })
     local file = vim.fn.tempname()

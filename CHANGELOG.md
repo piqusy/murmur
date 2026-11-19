@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.1] — 2026-11-19
+
+### Changed
+- Box-mode notes appear above the first annotated line instead of below it.
+
 ## [0.5.0] — 2026-10-18
 
 ### Added

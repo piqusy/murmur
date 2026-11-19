@@ -1,6 +1,6 @@
 # murmur.nvim
 
-Inline line and range annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines or visual selections. Murmurs render as boxed virtual text below the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
+Inline line and range annotations for Neovim - leave instructions for your AI agent (or future-you) directly on source lines or visual selections. Murmurs render as boxed virtual text above the anchored line, or as compact end-of-line shadow text, with a persistent sign-column indicator so you always know where annotations live.
 
 ## Quick Start
 
